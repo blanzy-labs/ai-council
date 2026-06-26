@@ -30,6 +30,19 @@ type CouncilSession = {
   updated_at: string;
 };
 
+type ProviderName = "mock" | "openai";
+
+type ProviderResponse = {
+  provider: string;
+  model: string;
+  persona_id: string;
+  persona_name: string;
+  content: string;
+  raw_response_id?: string | null;
+  usage?: Record<string, unknown> | null;
+  finish_reason?: string | null;
+};
+
 type LoadStatus = "idle" | "loading" | "ok" | "error";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -82,6 +95,15 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [session, setSession] = useState<CouncilSession | null>(null);
   const [sessionError, setSessionError] = useState("");
+  const [providerPersonaId, setProviderPersonaId] = useState("skeptic");
+  const [providerName, setProviderName] = useState<ProviderName>("mock");
+  const [providerPrompt, setProviderPrompt] = useState(
+    "What is the biggest risk in this idea?",
+  );
+  const [isTestingProvider, setIsTestingProvider] = useState(false);
+  const [providerResponse, setProviderResponse] =
+    useState<ProviderResponse | null>(null);
+  const [providerError, setProviderError] = useState("");
 
   const healthUrl = useMemo(() => `${normalizedApiBaseUrl}/health`, []);
   const visibleSelectedPersonaIds = useMemo(
@@ -160,6 +182,9 @@ function App() {
 
         const data = (await response.json()) as Persona[];
         setPersonas(data);
+        if (!data.some((persona) => persona.id === providerPersonaId)) {
+          setProviderPersonaId(data[0]?.id ?? "");
+        }
         setPersonaStatus("ok");
       } catch (error) {
         if (controller.signal.aborted) {
@@ -218,6 +243,40 @@ function App() {
       );
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleProviderTest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsTestingProvider(true);
+    setProviderResponse(null);
+    setProviderError("");
+
+    try {
+      const response = await fetch(`${normalizedApiBaseUrl}/providers/test-generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          provider: providerName,
+          persona_id: providerPersonaId,
+          user_prompt: providerPrompt,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const data = (await response.json()) as ProviderResponse;
+      setProviderResponse(data);
+    } catch (error) {
+      setProviderError(
+        error instanceof Error ? error.message : "Provider test failed.",
+      );
+    } finally {
+      setIsTestingProvider(false);
     }
   }
 
@@ -353,6 +412,85 @@ function App() {
             </div>
           )}
         </section>
+      </section>
+
+      <section className="panel provider-panel" aria-labelledby="provider-title">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Provider adapter</p>
+            <h2 id="provider-title">Provider Test</h2>
+          </div>
+          <span className="count-badge">{providerName}</span>
+        </div>
+
+        <form className="provider-form" onSubmit={handleProviderTest}>
+          <label>
+            <span>Persona</span>
+            <select
+              disabled={personaStatus !== "ok"}
+              onChange={(event) => setProviderPersonaId(event.target.value)}
+              required
+              value={providerPersonaId}
+            >
+              {personas.map((persona) => (
+                <option key={persona.id} value={persona.id}>
+                  {persona.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Provider</span>
+            <select
+              onChange={(event) => setProviderName(event.target.value as ProviderName)}
+              value={providerName}
+            >
+              <option value="mock">mock</option>
+              <option value="openai">openai</option>
+            </select>
+          </label>
+
+          <label className="provider-prompt">
+            <span>User prompt</span>
+            <textarea
+              onChange={(event) => setProviderPrompt(event.target.value)}
+              required
+              rows={4}
+              value={providerPrompt}
+            />
+          </label>
+
+          <button
+            disabled={
+              isTestingProvider ||
+              personaStatus !== "ok" ||
+              !providerPersonaId ||
+              !providerPrompt.trim()
+            }
+            type="submit"
+          >
+            {isTestingProvider ? "Testing..." : "Test Provider"}
+          </button>
+        </form>
+
+        {providerResponse && (
+          <div className="provider-result" role="status">
+            <div className="provider-meta">
+              <span>{providerResponse.provider}</span>
+              <span>{providerResponse.model}</span>
+              <span>{providerResponse.persona_name}</span>
+            </div>
+            <p>{providerResponse.content}</p>
+          </div>
+        )}
+
+        {providerError && (
+          <div className="provider-result provider-result-error" role="alert">
+            <strong>Error</strong>
+            <p>{providerError}</p>
+          </div>
+        )}
       </section>
     </main>
   );

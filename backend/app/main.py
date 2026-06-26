@@ -4,7 +4,14 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.models.persona import Persona
+from app.models.provider import (
+    ProviderError,
+    ProviderRequest,
+    ProviderResponse,
+    ProviderTestGenerateRequest,
+)
 from app.models.session import CouncilSession, CouncilSessionCreate
+from app.providers.factory import get_provider
 from app.services.persona_registry import persona_registry
 from app.services.session_store import session_store
 
@@ -61,6 +68,51 @@ def get_persona(persona_id: str) -> Persona:
             detail=f"Persona '{persona_id}' not found.",
         )
     return persona
+
+
+@app.post("/providers/test-generate", response_model=ProviderResponse)
+def test_generate_provider(
+    test_request: ProviderTestGenerateRequest,
+) -> ProviderResponse:
+    persona = persona_registry.get_persona(test_request.persona_id)
+    if persona is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Persona '{test_request.persona_id}' not found.",
+        )
+
+    provider_name = test_request.provider or persona.provider
+    model = test_request.model
+    if model is None and persona.model != "default":
+        model = persona.model
+
+    try:
+        provider = get_provider(provider_name)
+        return provider.generate(
+            ProviderRequest(
+                persona_id=persona.id,
+                persona_name=persona.name,
+                system_prompt=persona.system_prompt,
+                user_prompt=test_request.user_prompt,
+                model=model,
+            )
+        )
+    except ProviderError as exc:
+        if exc.error_type == "missing_api_key":
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        elif exc.error_type == "unsupported_provider":
+            status_code = status.HTTP_400_BAD_REQUEST
+        else:
+            status_code = status.HTTP_502_BAD_GATEWAY
+
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "provider": exc.provider,
+                "message": exc.message,
+                "error_type": exc.error_type,
+            },
+        ) from exc
 
 
 @app.post(

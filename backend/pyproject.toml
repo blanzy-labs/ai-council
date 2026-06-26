@@ -5,6 +5,8 @@ description = "Local-first FastAPI backend for AI Council."
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "fastapi>=0.116.0",
+    "openai>=2.44.0",
+    "pydantic-settings>=2.14.2",
     "uvicorn[standard]>=0.35.0",
 ]
 
@@ -17,3 +19,6 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "integration: tests that call external services and are skipped unless explicitly enabled",
+]
