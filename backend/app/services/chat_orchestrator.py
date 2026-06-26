@@ -7,6 +7,7 @@ from app.models.persona import Persona
 from app.models.provider import ProviderError, ProviderRequest
 from app.models.session import CouncilSession
 from app.providers.factory import get_provider
+from app.services.event_bus import EventBus
 from app.services.persona_registry import PersonaRegistry
 from app.services.transcript_store import TranscriptStore
 
@@ -20,9 +21,11 @@ class ChatOrchestrator:
         self,
         persona_registry: PersonaRegistry,
         transcript_store: TranscriptStore,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.persona_registry = persona_registry
         self.transcript_store = transcript_store
+        self.event_bus = event_bus
 
     def chat(
         self,
@@ -33,6 +36,15 @@ class ChatOrchestrator:
         next_index = len(existing_messages) + 1
         new_messages: list[CouncilMessage] = []
         errors: list[dict[str, Any]] = []
+
+        self._publish(
+            session_id=session.id,
+            event_type="chat_started",
+            status="started",
+            message="Chat follow-up started.",
+            content=chat_request.message,
+            metadata={"target": chat_request.target.type},
+        )
 
         def create_message(
             persona_id: str,
@@ -67,6 +79,7 @@ class ChatOrchestrator:
             metadata={"follow_up": True},
         )
         new_messages.append(user_message)
+        self._publish_message_appended(user_message)
 
         selected_personas = self._selected_personas(session)
         moderator = self._moderator(selected_personas)
@@ -74,6 +87,16 @@ class ChatOrchestrator:
         responses: list[CouncilMessage] = []
 
         for persona in responders:
+            self._publish(
+                session_id=session.id,
+                event_type="persona_started",
+                status="started",
+                message=f"{persona.name} started.",
+                persona_id=persona.id,
+                persona_name=persona.name,
+                role="persona",
+                metadata={"target": chat_request.target.type},
+            )
             provider_response = self._generate_response(
                 persona=persona,
                 session=session,
@@ -102,6 +125,20 @@ class ChatOrchestrator:
             )
             responses.append(response_message)
             new_messages.append(response_message)
+            self._publish(
+                session_id=session.id,
+                event_type="persona_completed",
+                status="completed",
+                message=f"{persona.name} completed.",
+                persona_id=persona.id,
+                persona_name=persona.name,
+                role=response_message.role,
+                provider=provider_response.provider,
+                model=provider_response.model,
+                content=provider_response.content,
+                metadata={"target": chat_request.target.type},
+            )
+            self._publish_message_appended(response_message)
 
         summary_message: CouncilMessage | None = None
         if (
@@ -109,6 +146,15 @@ class ChatOrchestrator:
             and moderator is not None
             and responses
         ):
+            self._publish(
+                session_id=session.id,
+                event_type="moderator_started",
+                status="started",
+                message=f"{moderator.name} started summary.",
+                persona_id=moderator.id,
+                persona_name=moderator.name,
+                role="moderator",
+            )
             provider_response = self._generate_response(
                 persona=moderator,
                 session=session,
@@ -134,12 +180,26 @@ class ChatOrchestrator:
                     },
                 )
                 new_messages.append(summary_message)
+                self._publish(
+                    session_id=session.id,
+                    event_type="moderator_completed",
+                    status="completed",
+                    message=f"{moderator.name} completed summary.",
+                    persona_id=moderator.id,
+                    persona_name=moderator.name,
+                    role="moderator",
+                    provider=provider_response.provider,
+                    model=provider_response.model,
+                    content=provider_response.content,
+                    metadata={"summary": True},
+                )
+                self._publish_message_appended(summary_message)
 
         self.transcript_store.append_messages(session.id, new_messages)
         all_messages = self.transcript_store.list_messages(session.id) or []
 
         status = "completed" if responses or summary_message is not None else "failed"
-        return ChatResponse(
+        response = ChatResponse(
             session_id=session.id,
             status=status,
             user_message=user_message,
@@ -148,6 +208,14 @@ class ChatOrchestrator:
             errors=errors,
             messages=all_messages,
         )
+        self._publish(
+            session_id=session.id,
+            event_type="chat_completed",
+            status=status,
+            message=f"Chat follow-up {status}.",
+            metadata={"error_count": len(errors), "message_count": len(new_messages)},
+        )
+        return response
 
     def _responders(
         self,
@@ -199,25 +267,25 @@ class ChatOrchestrator:
                 )
             )
         except ProviderError as exc:
-            errors.append(
-                {
-                    "persona_id": persona.id,
-                    "persona_name": persona.name,
-                    "provider": exc.provider,
-                    "message": exc.message,
-                    "error_type": exc.error_type,
-                }
-            )
+            error = {
+                "persona_id": persona.id,
+                "persona_name": persona.name,
+                "provider": exc.provider,
+                "message": exc.message,
+                "error_type": exc.error_type,
+            }
+            errors.append(error)
+            self._publish_error(session.id, error)
         except Exception as exc:
-            errors.append(
-                {
-                    "persona_id": persona.id,
-                    "persona_name": persona.name,
-                    "provider": provider_name,
-                    "message": "Provider call failed.",
-                    "error_type": exc.__class__.__name__,
-                }
-            )
+            error = {
+                "persona_id": persona.id,
+                "persona_name": persona.name,
+                "provider": provider_name,
+                "message": "Provider call failed.",
+                "error_type": exc.__class__.__name__,
+            }
+            errors.append(error)
+            self._publish_error(session.id, error)
 
         return None
 
@@ -298,3 +366,64 @@ class ChatOrchestrator:
 
     def _now(self) -> datetime:
         return datetime.now(timezone.utc).replace(microsecond=0)
+
+    def _publish(
+        self,
+        session_id: str,
+        event_type: str,
+        status: str,
+        message: str,
+        persona_id: str | None = None,
+        persona_name: str | None = None,
+        role: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        content: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self.event_bus is None:
+            return
+
+        self.event_bus.publish_event(
+            session_id=session_id,
+            event_type=event_type,  # type: ignore[arg-type]
+            status=status,  # type: ignore[arg-type]
+            message=message,
+            persona_id=persona_id,
+            persona_name=persona_name,
+            role=role,
+            provider=provider,
+            model=model,
+            content=content,
+            metadata=metadata,
+        )
+
+    def _publish_message_appended(self, message: CouncilMessage) -> None:
+        self._publish(
+            session_id=message.session_id,
+            event_type="message_appended",
+            status="completed",
+            message=f"{message.persona_name} message appended.",
+            persona_id=message.persona_id,
+            persona_name=message.persona_name,
+            role=message.role,
+            provider=message.provider,
+            model=message.model,
+            content=message.content,
+            metadata={
+                "message_id": message.id,
+                **(message.metadata or {}),
+            },
+        )
+
+    def _publish_error(self, session_id: str, error: dict[str, Any]) -> None:
+        self._publish(
+            session_id=session_id,
+            event_type="error",
+            status="failed",
+            message=str(error.get("message", "Provider call failed.")),
+            persona_id=error.get("persona_id"),
+            persona_name=error.get("persona_name"),
+            provider=error.get("provider"),
+            metadata={"error_type": error.get("error_type")},
+        )

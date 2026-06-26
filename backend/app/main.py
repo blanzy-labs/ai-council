@@ -1,10 +1,14 @@
+import asyncio
+import json
 import os
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from app.models.chat import ChatRequest, ChatResponse
 from app.models.council import CouncilMessage, CouncilRunRequest, CouncilRunResult
+from app.models.events import CouncilEvent
 from app.models.persona import Persona
 from app.models.provider import (
     ProviderError,
@@ -16,6 +20,7 @@ from app.models.session import CouncilSession, CouncilSessionCreate
 from app.providers.factory import get_provider
 from app.services.chat_orchestrator import ChatOrchestrator
 from app.services.council_orchestrator import CouncilOrchestrator
+from app.services.event_bus import event_bus
 from app.services.persona_registry import persona_registry
 from app.services.session_store import session_store
 from app.services.transcript_store import transcript_store
@@ -172,7 +177,10 @@ def run_session(
             ) from exc
 
     active_session = session_store.update_status(session_id, "active") or session
-    orchestrator = CouncilOrchestrator(persona_registry=persona_registry)
+    orchestrator = CouncilOrchestrator(
+        persona_registry=persona_registry,
+        event_bus=event_bus,
+    )
     result = orchestrator.run(active_session, run_request)
     transcript_store.save_run_result(session_id, result)
     session_store.update_status(session_id, result.status)
@@ -228,8 +236,60 @@ def chat_session(
     orchestrator = ChatOrchestrator(
         persona_registry=persona_registry,
         transcript_store=transcript_store,
+        event_bus=event_bus,
     )
     return orchestrator.chat(session, chat_request)
+
+
+@app.get("/sessions/{session_id}/events/recent", response_model=list[CouncilEvent])
+def get_recent_session_events(session_id: str) -> list[CouncilEvent]:
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found.",
+        )
+
+    return event_bus.list_events(session_id)
+
+
+@app.get("/sessions/{session_id}/events")
+async def stream_session_events(session_id: str) -> StreamingResponse:
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found.",
+        )
+
+    async def event_stream():
+        subscription = event_bus.subscribe(session_id, include_recent=True)
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(
+                        anext(subscription),
+                        timeout=15,
+                    )
+                except TimeoutError:
+                    yield ": heartbeat\n\n"
+                    continue
+
+                payload = json.dumps(event.model_dump(mode="json"))
+                yield f"event: {event.type}\ndata: {payload}\n\n"
+        except asyncio.CancelledError:
+            return
+        finally:
+            await subscription.aclose()
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.get("/sessions/{session_id}/result", response_model=CouncilRunResult)

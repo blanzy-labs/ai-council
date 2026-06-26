@@ -6,12 +6,18 @@ from app.models.persona import Persona
 from app.models.provider import ProviderError, ProviderRequest
 from app.models.session import CouncilSession
 from app.providers.factory import get_provider
+from app.services.event_bus import EventBus
 from app.services.persona_registry import PersonaRegistry
 
 
 class CouncilOrchestrator:
-    def __init__(self, persona_registry: PersonaRegistry) -> None:
+    def __init__(
+        self,
+        persona_registry: PersonaRegistry,
+        event_bus: EventBus | None = None,
+    ) -> None:
         self.persona_registry = persona_registry
+        self.event_bus = event_bus
 
     def run(
         self,
@@ -23,6 +29,15 @@ class CouncilOrchestrator:
         errors: list[dict[str, Any]] = []
         message_index = 1
 
+        self._publish(
+            session_id=session.id,
+            event_type="run_started",
+            status="started",
+            message="Council run started.",
+            content=session.topic,
+            metadata={"mode": session.mode},
+        )
+
         def add_message(
             persona_id: str,
             persona_name: str,
@@ -31,31 +46,32 @@ class CouncilOrchestrator:
             provider: str | None = None,
             model: str | None = None,
             metadata: dict[str, Any] | None = None,
-        ) -> None:
+        ) -> CouncilMessage:
             nonlocal message_index
-            messages.append(
-                CouncilMessage(
-                    id=f"msg-{message_index:04d}",
-                    session_id=session.id,
-                    persona_id=persona_id,
-                    persona_name=persona_name,
-                    role=role,  # type: ignore[arg-type]
-                    provider=provider,
-                    model=model,
-                    content=content,
-                    created_at=self._now(),
-                    metadata=metadata,
-                )
+            message = CouncilMessage(
+                id=f"msg-{message_index:04d}",
+                session_id=session.id,
+                persona_id=persona_id,
+                persona_name=persona_name,
+                role=role,  # type: ignore[arg-type]
+                provider=provider,
+                model=model,
+                content=content,
+                created_at=self._now(),
+                metadata=metadata,
             )
+            messages.append(message)
             message_index += 1
+            return message
 
-        add_message(
+        user_message = add_message(
             persona_id="user",
             persona_name="User",
             role="user",
             content=session.topic,
             metadata={"title": session.title},
         )
+        self._publish_message_appended(user_message)
 
         selected_personas = self._selected_personas(session)
         moderator = self._moderator(selected_personas)
@@ -73,6 +89,16 @@ class CouncilOrchestrator:
 
         for round_number in range(1, rounds + 1):
             for persona in participants:
+                self._publish(
+                    session_id=session.id,
+                    event_type="persona_started",
+                    status="started",
+                    message=f"{persona.name} started.",
+                    persona_id=persona.id,
+                    persona_name=persona.name,
+                    role="persona",
+                    metadata={"round": round_number},
+                )
                 provider_response = self._generate_persona_response(
                     persona=persona,
                     session=session,
@@ -85,7 +111,7 @@ class CouncilOrchestrator:
                 if provider_response is None:
                     continue
 
-                add_message(
+                persona_message = add_message(
                     persona_id=persona.id,
                     persona_name=persona.name,
                     role="persona",
@@ -99,6 +125,20 @@ class CouncilOrchestrator:
                         "finish_reason": provider_response.finish_reason,
                     },
                 )
+                self._publish(
+                    session_id=session.id,
+                    event_type="persona_completed",
+                    status="completed",
+                    message=f"{persona.name} completed.",
+                    persona_id=persona.id,
+                    persona_name=persona.name,
+                    role="persona",
+                    provider=provider_response.provider,
+                    model=provider_response.model,
+                    content=provider_response.content,
+                    metadata={"round": round_number},
+                )
+                self._publish_message_appended(persona_message)
 
         summary: str | None = None
         if (
@@ -106,6 +146,15 @@ class CouncilOrchestrator:
             and run_request.include_moderator_summary
             and messages
         ):
+            self._publish(
+                session_id=session.id,
+                event_type="moderator_started",
+                status="started",
+                message=f"{moderator.name} started summary.",
+                persona_id=moderator.id,
+                persona_name=moderator.name,
+                role="moderator",
+            )
             provider_response = self._generate_persona_response(
                 persona=moderator,
                 session=session,
@@ -117,7 +166,7 @@ class CouncilOrchestrator:
             )
             if provider_response is not None:
                 summary = provider_response.content
-                add_message(
+                moderator_message = add_message(
                     persona_id=moderator.id,
                     persona_name=moderator.name,
                     role="moderator",
@@ -131,13 +180,27 @@ class CouncilOrchestrator:
                         "finish_reason": provider_response.finish_reason,
                     },
                 )
+                self._publish(
+                    session_id=session.id,
+                    event_type="moderator_completed",
+                    status="completed",
+                    message=f"{moderator.name} completed summary.",
+                    persona_id=moderator.id,
+                    persona_name=moderator.name,
+                    role="moderator",
+                    provider=provider_response.provider,
+                    model=provider_response.model,
+                    content=provider_response.content,
+                    metadata={"summary": True},
+                )
+                self._publish_message_appended(moderator_message)
 
         generated_messages = [
             message for message in messages if message.role in {"persona", "moderator"}
         ]
         result_status = "completed" if generated_messages else "failed"
 
-        return CouncilRunResult(
+        result = CouncilRunResult(
             session_id=session.id,
             status=result_status,
             mode=session.mode,
@@ -148,6 +211,14 @@ class CouncilOrchestrator:
             created_at=run_started_at,
             completed_at=self._now(),
         )
+        self._publish(
+            session_id=session.id,
+            event_type="run_completed",
+            status=result_status,
+            message=f"Council run {result_status}.",
+            metadata={"error_count": len(errors), "message_count": len(messages)},
+        )
+        return result
 
     def _generate_persona_response(
         self,
@@ -179,25 +250,25 @@ class CouncilOrchestrator:
                 )
             )
         except ProviderError as exc:
-            errors.append(
-                {
-                    "persona_id": persona.id,
-                    "persona_name": persona.name,
-                    "provider": exc.provider,
-                    "message": exc.message,
-                    "error_type": exc.error_type,
-                }
-            )
+            error = {
+                "persona_id": persona.id,
+                "persona_name": persona.name,
+                "provider": exc.provider,
+                "message": exc.message,
+                "error_type": exc.error_type,
+            }
+            errors.append(error)
+            self._publish_error(session.id, error)
         except Exception as exc:
-            errors.append(
-                {
-                    "persona_id": persona.id,
-                    "persona_name": persona.name,
-                    "provider": provider_name,
-                    "message": "Provider call failed.",
-                    "error_type": exc.__class__.__name__,
-                }
-            )
+            error = {
+                "persona_id": persona.id,
+                "persona_name": persona.name,
+                "provider": provider_name,
+                "message": "Provider call failed.",
+                "error_type": exc.__class__.__name__,
+            }
+            errors.append(error)
+            self._publish_error(session.id, error)
 
         return None
 
@@ -260,3 +331,64 @@ class CouncilOrchestrator:
 
     def _now(self) -> datetime:
         return datetime.now(timezone.utc).replace(microsecond=0)
+
+    def _publish(
+        self,
+        session_id: str,
+        event_type: str,
+        status: str,
+        message: str,
+        persona_id: str | None = None,
+        persona_name: str | None = None,
+        role: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        content: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self.event_bus is None:
+            return
+
+        self.event_bus.publish_event(
+            session_id=session_id,
+            event_type=event_type,  # type: ignore[arg-type]
+            status=status,  # type: ignore[arg-type]
+            message=message,
+            persona_id=persona_id,
+            persona_name=persona_name,
+            role=role,
+            provider=provider,
+            model=model,
+            content=content,
+            metadata=metadata,
+        )
+
+    def _publish_message_appended(self, message: CouncilMessage) -> None:
+        self._publish(
+            session_id=message.session_id,
+            event_type="message_appended",
+            status="completed",
+            message=f"{message.persona_name} message appended.",
+            persona_id=message.persona_id,
+            persona_name=message.persona_name,
+            role=message.role,
+            provider=message.provider,
+            model=message.model,
+            content=message.content,
+            metadata={
+                "message_id": message.id,
+                **(message.metadata or {}),
+            },
+        )
+
+    def _publish_error(self, session_id: str, error: dict[str, Any]) -> None:
+        self._publish(
+            session_id=session_id,
+            event_type="error",
+            status="failed",
+            message=str(error.get("message", "Provider call failed.")),
+            persona_id=error.get("persona_id"),
+            persona_name=error.get("persona_name"),
+            provider=error.get("provider"),
+            metadata={"error_type": error.get("error_type")},
+        )

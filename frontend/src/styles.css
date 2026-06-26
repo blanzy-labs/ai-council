@@ -468,6 +468,54 @@ h2 {
   gap: 0.75rem;
 }
 
+.event-list {
+  display: grid;
+  gap: 0.6rem;
+  max-height: 18rem;
+  overflow: auto;
+}
+
+.event-row {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.42);
+}
+
+.event-row strong,
+.event-row span {
+  display: block;
+}
+
+.event-row strong {
+  color: #f8fafc;
+  font-size: 0.94rem;
+}
+
+.event-row span {
+  color: #a8b3c7;
+  font-size: 0.82rem;
+}
+
+.event-completed {
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.event-failed {
+  border-color: rgba(251, 113, 133, 0.42);
+}
+
+.event-meta {
+  flex: 0 0 auto;
+  max-width: 45%;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 @media (max-width: 880px) {
   .workspace-grid,
   .health-panel,
@@ -480,6 +528,15 @@ h2 {
   .provider-prompt,
   .chat-message-field {
     grid-column: auto;
+  }
+
+  .event-row {
+    display: grid;
+  }
+
+  .event-meta {
+    max-width: none;
+    text-align: left;
   }
 }
 

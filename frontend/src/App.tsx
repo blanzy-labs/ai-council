@@ -67,6 +67,32 @@ type ChatResponse = {
   messages: CouncilMessage[];
 };
 
+type CouncilEvent = {
+  id: string;
+  session_id: string;
+  type:
+    | "run_started"
+    | "chat_started"
+    | "persona_started"
+    | "persona_completed"
+    | "moderator_started"
+    | "moderator_completed"
+    | "message_appended"
+    | "error"
+    | "run_completed"
+    | "chat_completed";
+  status: "started" | "in_progress" | "completed" | "failed";
+  message: string;
+  persona_id?: string | null;
+  persona_name?: string | null;
+  role?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  content?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+};
+
 type ProviderName = "mock" | "openai";
 
 type ProviderResponse = {
@@ -97,6 +123,19 @@ const modes: Array<{ value: CouncilMode; label: string }> = [
   { value: "ask_council", label: "Ask council" },
   { value: "council_discussion", label: "Council discussion" },
   { value: "ask_one", label: "Ask one" },
+];
+
+const eventTypes: CouncilEvent["type"][] = [
+  "run_started",
+  "chat_started",
+  "persona_started",
+  "persona_completed",
+  "moderator_started",
+  "moderator_completed",
+  "message_appended",
+  "error",
+  "run_completed",
+  "chat_completed",
 ];
 
 async function readApiError(response: Response) {
@@ -145,6 +184,37 @@ function TranscriptView({ messages }: { messages: CouncilMessage[] }) {
   );
 }
 
+function eventToMessage(event: CouncilEvent): CouncilMessage | null {
+  if (event.type !== "message_appended" || !event.content) {
+    return null;
+  }
+
+  const messageId =
+    typeof event.metadata?.message_id === "string"
+      ? event.metadata.message_id
+      : event.id;
+  const role =
+    event.role === "user" ||
+    event.role === "persona" ||
+    event.role === "moderator" ||
+    event.role === "system"
+      ? event.role
+      : "system";
+
+  return {
+    id: messageId,
+    session_id: event.session_id,
+    persona_id: event.persona_id ?? "system",
+    persona_name: event.persona_name ?? "System",
+    role,
+    provider: event.provider,
+    model: event.model,
+    content: event.content,
+    created_at: event.created_at,
+    metadata: event.metadata,
+  };
+}
+
 function App() {
   const [health, setHealth] = useState<HealthStatus>({
     status: "idle",
@@ -185,6 +255,9 @@ function App() {
   const [isSendingChat, setIsSendingChat] = useState(false);
   const [chatErrors, setChatErrors] = useState<Array<Record<string, unknown>>>([]);
   const [chatError, setChatError] = useState("");
+  const [liveEvents, setLiveEvents] = useState<CouncilEvent[]>([]);
+  const [eventConnectionStatus, setEventConnectionStatus] =
+    useState("idle");
   const [providerPersonaId, setProviderPersonaId] = useState("skeptic");
   const [providerName, setProviderName] = useState<ProviderName>("mock");
   const [providerPrompt, setProviderPrompt] = useState(
@@ -322,6 +395,60 @@ function App() {
     }
   }, [chatPersonaId, session, sessionNonModeratorPersonas]);
 
+  useEffect(() => {
+    if (!session) {
+      setLiveEvents([]);
+      setEventConnectionStatus("idle");
+      return;
+    }
+
+    if (typeof EventSource === "undefined") {
+      setEventConnectionStatus("unavailable");
+      return;
+    }
+
+    setLiveEvents([]);
+    setEventConnectionStatus("connecting");
+
+    const source = new EventSource(
+      `${normalizedApiBaseUrl}/sessions/${session.id}/events`,
+    );
+
+    function handleEvent(eventMessage: MessageEvent<string>) {
+      const event = JSON.parse(eventMessage.data) as CouncilEvent;
+      setLiveEvents((current) => {
+        if (current.some((existing) => existing.id === event.id)) {
+          return current;
+        }
+        return [...current, event].slice(-100);
+      });
+
+      const message = eventToMessage(event);
+      if (message) {
+        setTranscriptMessages((current) => {
+          if (current.some((existing) => existing.id === message.id)) {
+            return current;
+          }
+          return [...current, message];
+        });
+      }
+    }
+
+    source.onopen = () => setEventConnectionStatus("open");
+    source.onerror = () => setEventConnectionStatus("reconnecting");
+
+    eventTypes.forEach((eventType) => {
+      source.addEventListener(eventType, handleEvent as EventListener);
+    });
+
+    return () => {
+      eventTypes.forEach((eventType) => {
+        source.removeEventListener(eventType, handleEvent as EventListener);
+      });
+      source.close();
+    };
+  }, [session?.id]);
+
   function togglePersona(personaId: string) {
     setSelectedPersonaIds((current) =>
       current.includes(personaId)
@@ -340,6 +467,7 @@ function App() {
     setTranscriptMessages([]);
     setChatErrors([]);
     setChatError("");
+    setLiveEvents([]);
 
     try {
       const response = await fetch(`${normalizedApiBaseUrl}/sessions`, {
@@ -717,6 +845,43 @@ function App() {
               )}
             </div>
           )}
+        </section>
+      )}
+
+      {session && (
+        <section className="panel events-panel" aria-labelledby="events-title">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Live stream</p>
+              <h2 id="events-title">Activity</h2>
+            </div>
+            <span className="count-badge">{eventConnectionStatus}</span>
+          </div>
+
+          <div className="event-list" role="log" aria-live="polite">
+            {liveEvents.length === 0 && (
+              <div className="inline-note">Waiting for session events...</div>
+            )}
+
+            {liveEvents.map((event) => (
+              <article
+                className={`event-row event-${event.status}`}
+                key={event.id}
+              >
+                <div>
+                  <strong>{event.message}</strong>
+                  <span>{event.type}</span>
+                </div>
+                {(event.persona_name || event.provider || event.model) && (
+                  <span className="event-meta">
+                    {[event.persona_name, event.provider, event.model]
+                      .filter(Boolean)
+                      .join(" / ")}
+                  </span>
+                )}
+              </article>
+            ))}
+          </div>
         </section>
       )}
 

@@ -1,6 +1,6 @@
 # AI Council
 
-AI Council is a local-first Mythadis Labs app that will become a text-based multi-persona AI council room. This repository contains the v0.1.0 scaffold: FastAPI backend, React/Vite frontend, Docker Compose wiring, health checks, default personas, in-memory sessions, provider adapters, a first non-streaming council orchestrator, and a simple chat room follow-up flow.
+AI Council is a local-first Mythadis Labs app that will become a text-based multi-persona AI council room. This repository contains the v0.1.0 scaffold: FastAPI backend, React/Vite frontend, Docker Compose wiring, health checks, default personas, in-memory sessions, provider adapters, a first non-streaming council orchestrator, simple chat room follow-ups, and event-level live transcript updates.
 
 ## v0.1.0 Scope
 
@@ -10,7 +10,8 @@ AI Council is a local-first Mythadis Labs app that will become a text-based mult
 - In-memory council session creation, lookup, run results, and messages.
 - Controlled non-streaming council runs for `ask_council`, `council_discussion`, and `ask_one`.
 - Follow-up chat to ask the whole council or one selected persona.
-- Frontend panels for health, personas, session creation, council runs, chat follow-ups, and provider testing.
+- Server-Sent Events for live run/chat activity updates.
+- Frontend panels for health, personas, session creation, council runs, live activity, chat follow-ups, and provider testing.
 - Local development and Docker Compose workflows.
 
 Session, run, and chat transcript data is memory-only and resets when the backend process restarts.
@@ -139,6 +140,38 @@ Optional moderator summaries are generated only when `include_moderator_summary=
 
 Context is compacted before provider calls. The current backend uses the latest 12 messages with a maximum context budget of about 6000 characters, with each message shortened before inclusion.
 
+## Event Streaming
+
+`GET /sessions/{session_id}/events` opens a Server-Sent Events stream for a session. The stream emits JSON `CouncilEvent` payloads for run and chat activity.
+
+This is event-level streaming only. v0.1.0 does not stream provider tokens. Provider calls still complete as normal, then emit structured events such as persona completion and message append.
+
+Recent events are buffered in memory per session:
+
+- `GET /sessions/{session_id}/events/recent`
+- buffer size: latest 100 events per session
+- storage: in-memory only
+
+Supported event types:
+
+- `run_started`
+- `chat_started`
+- `persona_started`
+- `persona_completed`
+- `moderator_started`
+- `moderator_completed`
+- `message_appended`
+- `error`
+- `run_completed`
+- `chat_completed`
+
+Supported event statuses:
+
+- `started`
+- `in_progress`
+- `completed`
+- `failed`
+
 ## API Endpoints
 
 - `GET /health`
@@ -150,6 +183,8 @@ Context is compacted before provider calls. The current backend uses the latest 
 - `GET /sessions/{session_id}`
 - `POST /sessions/{session_id}/run`
 - `POST /sessions/{session_id}/chat`
+- `GET /sessions/{session_id}/events`
+- `GET /sessions/{session_id}/events/recent`
 - `GET /sessions/{session_id}/result`
 - `GET /sessions/{session_id}/messages`
 
@@ -242,6 +277,30 @@ curl -X POST http://localhost:8000/sessions/<SESSION_ID>/chat \
   }'
 ```
 
+Get recent events:
+
+```sh
+curl http://localhost:8000/sessions/<SESSION_ID>/events/recent
+```
+
+Open a live SSE stream:
+
+```sh
+curl -N http://localhost:8000/sessions/<SESSION_ID>/events
+```
+
+Run a council in another terminal while the SSE stream is open:
+
+```sh
+curl -X POST http://localhost:8000/sessions/<SESSION_ID>/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider_override": "mock",
+    "max_rounds": 1,
+    "include_moderator_summary": true
+  }'
+```
+
 Get the latest stored result:
 
 ```sh
@@ -268,7 +327,8 @@ curl -X POST http://localhost:8000/providers/test-generate \
 
 ## v0.1.0 Limits
 
-- Non-streaming only
+- Event-level streaming only
+- No token-by-token provider streaming
 - In-memory only
 - No voice
 - No Gemini
