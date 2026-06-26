@@ -279,13 +279,15 @@ h2 {
 }
 
 .session-form,
-.provider-form {
+.provider-form,
+.run-form {
   display: grid;
   gap: 1rem;
 }
 
 .session-form label,
-.provider-form label {
+.provider-form label,
+.run-form label {
   display: grid;
   gap: 0.45rem;
   color: #cbd5e1;
@@ -298,6 +300,30 @@ h2 {
   align-items: end;
 }
 
+.run-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(160px, 0.5fr);
+  align-items: end;
+}
+
+.checkbox-row {
+  display: flex !important;
+  flex-direction: row;
+  gap: 0.6rem !important;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.62);
+}
+
+.checkbox-row input {
+  width: 1rem;
+  min-height: 1rem;
+  margin: 0;
+  accent-color: #34d399;
+}
+
 .provider-prompt {
   grid-column: 1 / -2;
 }
@@ -308,7 +334,9 @@ h2 {
 
 .inline-note,
 .session-result,
-.provider-result {
+.provider-result,
+.run-error,
+.run-result {
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 8px;
   background: rgba(2, 6, 23, 0.46);
@@ -321,13 +349,16 @@ h2 {
 
 .inline-note-error,
 .session-result-error,
-.provider-result-error {
+.provider-result-error,
+.run-error {
   border-color: rgba(251, 113, 133, 0.42);
   color: #fecdd3;
 }
 
 .session-result,
-.provider-result {
+.provider-result,
+.run-error,
+.run-result {
   display: grid;
   gap: 0.3rem;
   padding: 0.95rem;
@@ -345,7 +376,8 @@ h2 {
   color: #f8fafc;
 }
 
-.provider-result p {
+.provider-result p,
+.run-error p {
   margin-bottom: 0;
   color: #f8fafc;
   line-height: 1.55;
@@ -364,10 +396,72 @@ h2 {
   border-radius: 999px;
 }
 
+.run-result {
+  gap: 1rem;
+}
+
+.transcript {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.transcript-message {
+  display: grid;
+  gap: 0.7rem;
+  padding: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.transcript-message header {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.transcript-message strong,
+.transcript-message span {
+  display: block;
+}
+
+.transcript-message header span {
+  color: #a8b3c7;
+  font-size: 0.86rem;
+}
+
+.transcript-message p {
+  margin-bottom: 0;
+  color: #f8fafc;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.message-user {
+  border-color: rgba(125, 211, 252, 0.32);
+}
+
+.message-moderator {
+  border-color: rgba(52, 211, 153, 0.38);
+  background: rgba(6, 78, 59, 0.2);
+}
+
+.message-provider {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.run-error-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
 @media (max-width: 880px) {
   .workspace-grid,
   .health-panel,
-  .provider-form {
+  .provider-form,
+  .run-form {
     grid-template-columns: 1fr;
   }
 

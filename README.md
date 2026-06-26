@@ -1,19 +1,18 @@
 # AI Council
 
-AI Council is a local-first Mythadis Labs app that will become a text-based multi-persona AI council room. This repository contains the v0.1.0 scaffold: a FastAPI backend, a React/Vite frontend, Docker Compose wiring, health checks, default personas, in-memory council session creation, and a clean provider adapter layer.
+AI Council is a local-first Mythadis Labs app that will become a text-based multi-persona AI council room. This repository contains the v0.1.0 scaffold: FastAPI backend, React/Vite frontend, Docker Compose wiring, health checks, default personas, in-memory sessions, provider adapters, and a first non-streaming council orchestrator.
 
 ## v0.1.0 Scope
 
 - OpenAI-only configuration shape.
-- OpenAI provider adapter for manual testing.
-- Mock provider for deterministic local and test use.
-- Backend health endpoint at `/health`.
+- OpenAI provider adapter and deterministic mock provider.
 - Default persona registry exposed by the API.
-- In-memory council session creation and lookup.
-- Frontend landing page with backend health, persona cards, test session form, and provider test panel.
+- In-memory council session creation, lookup, run results, and messages.
+- Controlled non-streaming council runs for `ask_council`, `council_discussion`, and `ask_one`.
+- Frontend panels for health, personas, session creation, council runs, and provider testing.
 - Local development and Docker Compose workflows.
 
-Session data is memory-only for now and resets when the backend process restarts.
+Session and run data is memory-only and resets when the backend process restarts.
 
 ## Intentionally Out of Scope
 
@@ -23,11 +22,11 @@ Session data is memory-only for now and resets when the backend process restarts
 - Database
 - Telemetry
 - Persistence
-- Real chat orchestration
 - Streaming
-- Council-room OpenAI orchestration
+- Long-term history
+- Open-ended agent loops
 
-The app starts without `OPENAI_API_KEY`. Mock provider testing does not require an API key.
+The app starts without `OPENAI_API_KEY`. Mock provider tests and mock council runs do not require an API key.
 
 ## Configuration
 
@@ -39,12 +38,12 @@ cp .env.example .env
 
 Provider-related settings:
 
-- `OPENAI_API_KEY=` optional unless manually testing the real OpenAI provider
+- `OPENAI_API_KEY=` optional unless manually testing real OpenAI calls
 - `OPENAI_MODEL=gpt-4.1-mini`
 - `OPENAI_TIMEOUT_SECONDS=30`
 - `OPENAI_MAX_OUTPUT_TOKENS=700`
 
-The backend loads these settings at runtime. Missing `OPENAI_API_KEY` is handled gracefully by the OpenAI provider and does not prevent app startup.
+Missing `OPENAI_API_KEY` is handled gracefully by the OpenAI provider and does not prevent app startup.
 
 ## Personas
 
@@ -58,20 +57,9 @@ The backend includes seven default personas:
 - `customer_advocate`
 - `contrarian`
 
-Each persona has:
+Each persona has `id`, `name`, `role`, `provider`, `model`, `system_prompt`, `goals`, and `constraints`. For v0.1.0, every default persona uses `provider: openai` and `model: default`; mock runs can override the provider at runtime.
 
-- `id`
-- `name`
-- `role`
-- `provider`
-- `model`
-- `system_prompt`
-- `goals`
-- `constraints`
-
-For v0.1.0, every default persona uses `provider: openai` and `model: default`. The moderator focuses on keeping the discussion structured, summarizing key points, identifying disagreements, and not dominating the discussion.
-
-## Session Model
+## Sessions
 
 Council sessions are stored in memory and include:
 
@@ -86,9 +74,9 @@ Council sessions are stored in memory and include:
 
 Supported modes:
 
-- `ask_council`
-- `council_discussion`
-- `ask_one`
+- `ask_council`: each selected non-moderator persona responds once; moderator can summarize.
+- `council_discussion`: two controlled rounds max; moderator can summarize.
+- `ask_one`: the first selected non-moderator persona responds; moderator summary is optional.
 
 Supported statuses:
 
@@ -106,7 +94,36 @@ The backend has a simple provider interface:
 - `MockProvider` returns deterministic fake content for tests and local development.
 - `OpenAIProvider` uses the official OpenAI Python SDK, applies configured timeout and max output tokens, sends persona behavior through instructions, sets `store=False`, and normalizes the response.
 
-Real OpenAI calls are only available through the manual provider test endpoint in this slice. They are not wired into sessions or council orchestration yet.
+Normal tests do not call OpenAI.
+
+## Council Orchestrator
+
+`POST /sessions/{session_id}/run` executes the selected session through the provider layer and returns a normalized `CouncilRunResult`:
+
+- `session_id`
+- `status`
+- `mode`
+- `topic`
+- `messages`
+- `summary`
+- `errors`
+- `created_at`
+- `completed_at`
+
+Each `CouncilMessage` includes:
+
+- `id`
+- `session_id`
+- `persona_id`
+- `persona_name`
+- `role`
+- `provider`
+- `model`
+- `content`
+- `created_at`
+- `metadata`
+
+If one persona call fails, the run records an error and continues where possible. Unsupported provider overrides return a clean API error. Real OpenAI runs fail gracefully when `OPENAI_API_KEY` is missing.
 
 ## API Endpoints
 
@@ -117,14 +134,66 @@ Real OpenAI calls are only available through the manual provider test endpoint i
 - `POST /sessions`
 - `GET /sessions`
 - `GET /sessions/{session_id}`
+- `POST /sessions/{session_id}/run`
+- `GET /sessions/{session_id}/result`
+- `GET /sessions/{session_id}/messages`
 
-Example persona request:
+Create a session:
 
 ```sh
-curl http://localhost:8000/personas
+curl -X POST http://localhost:8000/sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Local-first AI Council",
+    "topic": "Should AI Council be built as a local-first multi-persona app?",
+    "mode": "ask_council",
+    "selected_persona_ids": [
+      "moderator",
+      "strategist",
+      "skeptic",
+      "builder",
+      "customer_advocate"
+    ]
+  }'
 ```
 
-Example mock provider test:
+Run a session with the mock provider:
+
+```sh
+curl -X POST http://localhost:8000/sessions/<SESSION_ID>/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider_override": "mock",
+    "max_rounds": 1,
+    "include_moderator_summary": true
+  }'
+```
+
+Run a session with OpenAI:
+
+```sh
+curl -X POST http://localhost:8000/sessions/<SESSION_ID>/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider_override": "openai",
+    "max_rounds": 1,
+    "include_moderator_summary": true
+  }'
+```
+
+Get the latest stored result:
+
+```sh
+curl http://localhost:8000/sessions/<SESSION_ID>/result
+```
+
+Get the latest stored messages:
+
+```sh
+curl http://localhost:8000/sessions/<SESSION_ID>/messages
+```
+
+Mock provider test:
 
 ```sh
 curl -X POST http://localhost:8000/providers/test-generate \
@@ -136,43 +205,16 @@ curl -X POST http://localhost:8000/providers/test-generate \
   }'
 ```
 
-Example OpenAI provider test:
+## v0.1.0 Limits
 
-```sh
-curl -X POST http://localhost:8000/providers/test-generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "provider": "openai",
-    "persona_id": "skeptic",
-    "user_prompt": "What is the biggest risk in this idea?"
-  }'
-```
-
-If `OPENAI_API_KEY` is missing, the OpenAI provider returns a clean error instead of failing app startup.
-
-Example session creation:
-
-```sh
-curl -X POST http://localhost:8000/sessions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Launch review",
-    "topic": "Should AI Council v0.1.0 include chat orchestration?",
-    "mode": "ask_council",
-    "selected_persona_ids": [
-      "moderator",
-      "strategist",
-      "skeptic",
-      "builder"
-    ]
-  }'
-```
-
-Example session list:
-
-```sh
-curl http://localhost:8000/sessions
-```
+- Non-streaming only
+- In-memory only
+- No voice
+- No Gemini
+- No persistence
+- No open-ended agent loops
+- No long-term chat history
+- No authentication
 
 ## Local Setup
 
@@ -198,8 +240,8 @@ Expected local URLs:
 - Backend: http://localhost:8000
 - Backend health: http://localhost:8000/health
 - Personas: http://localhost:8000/personas
-- Provider test: http://localhost:8000/providers/test-generate
 - Sessions: http://localhost:8000/sessions
+- Provider test: http://localhost:8000/providers/test-generate
 
 ## Docker Setup
 
@@ -220,9 +262,6 @@ Expected Docker URLs:
 - Frontend: http://localhost:5173
 - Backend: http://localhost:8000
 - Backend health: http://localhost:8000/health
-- Personas: http://localhost:8000/personas
-- Provider test: http://localhost:8000/providers/test-generate
-- Sessions: http://localhost:8000/sessions
 
 ## Tests and Checks
 
@@ -233,7 +272,7 @@ cd backend
 uv run pytest
 ```
 
-Normal tests do not call OpenAI. The real OpenAI smoke test is skipped unless both `OPENAI_API_KEY` and `RUN_OPENAI_INTEGRATION_TESTS=1` are set:
+The real OpenAI smoke test is skipped unless both `OPENAI_API_KEY` and `RUN_OPENAI_INTEGRATION_TESTS=1` are set:
 
 ```sh
 cd backend

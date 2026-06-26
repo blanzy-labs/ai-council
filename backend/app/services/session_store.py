@@ -33,6 +33,21 @@ class SessionStore:
     def list_sessions(self) -> list[CouncilSession]:
         return list(self._sessions.values())
 
+    def update_status(self, session_id: str, status: str) -> CouncilSession | None:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return None
+
+            updated_session = session.model_copy(
+                update={
+                    "status": status,
+                    "updated_at": datetime.now(timezone.utc).replace(microsecond=0),
+                }
+            )
+            self._sessions[session_id] = updated_session
+            return updated_session
+
     def clear(self) -> None:
         with self._lock:
             self._sessions.clear()

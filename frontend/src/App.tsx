@@ -30,6 +30,31 @@ type CouncilSession = {
   updated_at: string;
 };
 
+type CouncilMessage = {
+  id: string;
+  session_id: string;
+  persona_id: string;
+  persona_name: string;
+  role: "user" | "persona" | "moderator" | "system";
+  provider?: string | null;
+  model?: string | null;
+  content: string;
+  created_at: string;
+  metadata?: Record<string, unknown> | null;
+};
+
+type CouncilRunResult = {
+  session_id: string;
+  status: string;
+  mode: CouncilMode;
+  topic: string;
+  messages: CouncilMessage[];
+  summary?: string | null;
+  errors: Array<Record<string, unknown>>;
+  created_at: string;
+  completed_at: string;
+};
+
 type ProviderName = "mock" | "openai";
 
 type ProviderResponse = {
@@ -89,12 +114,19 @@ function App() {
   const [selectedPersonaIds, setSelectedPersonaIds] = useState<string[]>(
     defaultSelectedPersonaIds,
   );
-  const [title, setTitle] = useState("Slice B test council");
-  const [topic, setTopic] = useState("Review the persona and session model slice.");
+  const [title, setTitle] = useState("Slice D test council");
+  const [topic, setTopic] = useState("Review the first non-streaming council run.");
   const [mode, setMode] = useState<CouncilMode>("ask_council");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [session, setSession] = useState<CouncilSession | null>(null);
   const [sessionError, setSessionError] = useState("");
+  const [runProviderOverride, setRunProviderOverride] =
+    useState<ProviderName>("mock");
+  const [runMaxRounds, setRunMaxRounds] = useState(1);
+  const [includeModeratorSummary, setIncludeModeratorSummary] = useState(true);
+  const [isRunningCouncil, setIsRunningCouncil] = useState(false);
+  const [runResult, setRunResult] = useState<CouncilRunResult | null>(null);
+  const [runError, setRunError] = useState("");
   const [providerPersonaId, setProviderPersonaId] = useState("skeptic");
   const [providerName, setProviderName] = useState<ProviderName>("mock");
   const [providerPrompt, setProviderPrompt] = useState(
@@ -216,6 +248,8 @@ function App() {
     setIsSubmitting(true);
     setSession(null);
     setSessionError("");
+    setRunResult(null);
+    setRunError("");
 
     try {
       const response = await fetch(`${normalizedApiBaseUrl}/sessions`, {
@@ -237,12 +271,57 @@ function App() {
 
       const data = (await response.json()) as CouncilSession;
       setSession(data);
+      setRunMaxRounds(data.mode === "council_discussion" ? 2 : 1);
     } catch (error) {
       setSessionError(
         error instanceof Error ? error.message : "Could not create session.",
       );
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleRunCouncil(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session) {
+      return;
+    }
+
+    setIsRunningCouncil(true);
+    setRunResult(null);
+    setRunError("");
+
+    try {
+      const response = await fetch(
+        `${normalizedApiBaseUrl}/sessions/${session.id}/run`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            provider_override: runProviderOverride,
+            max_rounds: runMaxRounds,
+            include_moderator_summary: includeModeratorSummary,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const data = (await response.json()) as CouncilRunResult;
+      setRunResult(data);
+      setSession((current) =>
+        current ? { ...current, status: data.status } : current,
+      );
+    } catch (error) {
+      setRunError(
+        error instanceof Error ? error.message : "Council run failed.",
+      );
+    } finally {
+      setIsRunningCouncil(false);
     }
   }
 
@@ -413,6 +492,113 @@ function App() {
           )}
         </section>
       </section>
+
+      {session && (
+        <section className="panel run-panel" aria-labelledby="run-title">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Council run</p>
+              <h2 id="run-title">Run Council</h2>
+            </div>
+            <span className="count-badge">{session.id}</span>
+          </div>
+
+          <form className="run-form" onSubmit={handleRunCouncil}>
+            <label>
+              <span>Provider override</span>
+              <select
+                onChange={(event) =>
+                  setRunProviderOverride(event.target.value as ProviderName)
+                }
+                value={runProviderOverride}
+              >
+                <option value="mock">mock</option>
+                <option value="openai">openai</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Max rounds</span>
+              <select
+                onChange={(event) => setRunMaxRounds(Number(event.target.value))}
+                value={runMaxRounds}
+              >
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+              </select>
+            </label>
+
+            <label className="checkbox-row">
+              <input
+                checked={includeModeratorSummary}
+                onChange={(event) =>
+                  setIncludeModeratorSummary(event.target.checked)
+                }
+                type="checkbox"
+              />
+              <span>Include moderator summary</span>
+            </label>
+
+            <button disabled={isRunningCouncil} type="submit">
+              {isRunningCouncil ? "Running..." : "Run Council"}
+            </button>
+          </form>
+
+          {runError && (
+            <div className="run-error" role="alert">
+              <strong>Error</strong>
+              <p>{runError}</p>
+            </div>
+          )}
+
+          {runResult && (
+            <div className="run-result" role="status">
+              <div className="provider-meta">
+                <span>{runResult.status}</span>
+                <span>{runResult.mode}</span>
+                <span>{runResult.messages.length} messages</span>
+              </div>
+
+              <div className="transcript">
+                {runResult.messages.map((message) => (
+                  <article
+                    className={`transcript-message message-${message.role}`}
+                    key={message.id}
+                  >
+                    <header>
+                      <div>
+                        <strong>{message.persona_name}</strong>
+                        <span>{message.role}</span>
+                      </div>
+                      {(message.provider || message.model) && (
+                        <span className="message-provider">
+                          {[message.provider, message.model]
+                            .filter(Boolean)
+                            .join(" / ")}
+                        </span>
+                      )}
+                    </header>
+                    <p>{message.content}</p>
+                  </article>
+                ))}
+              </div>
+
+              {runResult.errors.length > 0 && (
+                <div className="run-error-list">
+                  {runResult.errors.map((error, index) => (
+                    <div className="run-error" key={`${error.persona_id}-${index}`}>
+                      <strong>{String(error.persona_name ?? "Persona error")}</strong>
+                      <p>
+                        {String(error.message ?? "The persona call failed.")}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="panel provider-panel" aria-labelledby="provider-title">
         <div className="panel-heading">
