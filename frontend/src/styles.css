@@ -280,14 +280,16 @@ h2 {
 
 .session-form,
 .provider-form,
-.run-form {
+.run-form,
+.chat-form {
   display: grid;
   gap: 1rem;
 }
 
 .session-form label,
 .provider-form label,
-.run-form label {
+.run-form label,
+.chat-form label {
   display: grid;
   gap: 0.45rem;
   color: #cbd5e1;
@@ -303,6 +305,15 @@ h2 {
 .run-form {
   grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(160px, 0.5fr);
   align-items: end;
+}
+
+.chat-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(160px, 0.5fr);
+  align-items: end;
+}
+
+.chat-message-field {
+  grid-column: 1 / -1;
 }
 
 .checkbox-row {
@@ -461,11 +472,13 @@ h2 {
   .workspace-grid,
   .health-panel,
   .provider-form,
-  .run-form {
+  .run-form,
+  .chat-form {
     grid-template-columns: 1fr;
   }
 
-  .provider-prompt {
+  .provider-prompt,
+  .chat-message-field {
     grid-column: auto;
   }
 }

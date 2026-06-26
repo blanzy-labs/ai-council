@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.models.chat import ChatRequest, ChatResponse
 from app.models.council import CouncilMessage, CouncilRunRequest, CouncilRunResult
 from app.models.persona import Persona
 from app.models.provider import (
@@ -13,6 +14,7 @@ from app.models.provider import (
 )
 from app.models.session import CouncilSession, CouncilSessionCreate
 from app.providers.factory import get_provider
+from app.services.chat_orchestrator import ChatOrchestrator
 from app.services.council_orchestrator import CouncilOrchestrator
 from app.services.persona_registry import persona_registry
 from app.services.session_store import session_store
@@ -176,6 +178,58 @@ def run_session(
     session_store.update_status(session_id, result.status)
 
     return result
+
+
+@app.post("/sessions/{session_id}/chat", response_model=ChatResponse)
+def chat_session(
+    session_id: str,
+    chat_request: ChatRequest,
+) -> ChatResponse:
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found.",
+        )
+
+    if chat_request.provider_override is not None:
+        try:
+            get_provider(chat_request.provider_override)
+        except ProviderError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "provider": exc.provider,
+                    "message": exc.message,
+                    "error_type": exc.error_type,
+                },
+            ) from exc
+
+    if chat_request.target.type == "persona":
+        persona_id = chat_request.target.persona_id
+        if persona_id not in session.selected_persona_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Target persona is not selected for this session.",
+                    "persona_id": persona_id,
+                },
+            )
+
+        if persona_id is not None and persona_registry.get_persona(persona_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Target persona does not exist.",
+                    "persona_id": persona_id,
+                },
+            )
+
+    orchestrator = ChatOrchestrator(
+        persona_registry=persona_registry,
+        transcript_store=transcript_store,
+    )
+    return orchestrator.chat(session, chat_request)
 
 
 @app.get("/sessions/{session_id}/result", response_model=CouncilRunResult)

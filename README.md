@@ -1,6 +1,6 @@
 # AI Council
 
-AI Council is a local-first Mythadis Labs app that will become a text-based multi-persona AI council room. This repository contains the v0.1.0 scaffold: FastAPI backend, React/Vite frontend, Docker Compose wiring, health checks, default personas, in-memory sessions, provider adapters, and a first non-streaming council orchestrator.
+AI Council is a local-first Mythadis Labs app that will become a text-based multi-persona AI council room. This repository contains the v0.1.0 scaffold: FastAPI backend, React/Vite frontend, Docker Compose wiring, health checks, default personas, in-memory sessions, provider adapters, a first non-streaming council orchestrator, and a simple chat room follow-up flow.
 
 ## v0.1.0 Scope
 
@@ -9,10 +9,11 @@ AI Council is a local-first Mythadis Labs app that will become a text-based mult
 - Default persona registry exposed by the API.
 - In-memory council session creation, lookup, run results, and messages.
 - Controlled non-streaming council runs for `ask_council`, `council_discussion`, and `ask_one`.
-- Frontend panels for health, personas, session creation, council runs, and provider testing.
+- Follow-up chat to ask the whole council or one selected persona.
+- Frontend panels for health, personas, session creation, council runs, chat follow-ups, and provider testing.
 - Local development and Docker Compose workflows.
 
-Session and run data is memory-only and resets when the backend process restarts.
+Session, run, and chat transcript data is memory-only and resets when the backend process restarts.
 
 ## Intentionally Out of Scope
 
@@ -125,6 +126,19 @@ Each `CouncilMessage` includes:
 
 If one persona call fails, the run records an error and continues where possible. Unsupported provider overrides return a clean API error. Real OpenAI runs fail gracefully when `OPENAI_API_KEY` is missing.
 
+## Chat Room Follow-up Flow
+
+`POST /sessions/{session_id}/chat` appends a user follow-up message to the session transcript, calls either the whole council or one selected persona, appends the responses, and returns the full updated message list.
+
+Chat targets:
+
+- `council`: each selected non-moderator persona responds once.
+- `persona`: only the selected `persona_id` responds.
+
+Optional moderator summaries are generated only when `include_moderator_summary=true` and the moderator is selected for the session. Chat works even if no prior council run has been executed; the original session topic is still included in prompt context.
+
+Context is compacted before provider calls. The current backend uses the latest 12 messages with a maximum context budget of about 6000 characters, with each message shortened before inclusion.
+
 ## API Endpoints
 
 - `GET /health`
@@ -135,6 +149,7 @@ If one persona call fails, the run records an error and continues where possible
 - `GET /sessions`
 - `GET /sessions/{session_id}`
 - `POST /sessions/{session_id}/run`
+- `POST /sessions/{session_id}/chat`
 - `GET /sessions/{session_id}/result`
 - `GET /sessions/{session_id}/messages`
 
@@ -177,6 +192,52 @@ curl -X POST http://localhost:8000/sessions/<SESSION_ID>/run \
   -d '{
     "provider_override": "openai",
     "max_rounds": 1,
+    "include_moderator_summary": true
+  }'
+```
+
+Ask the whole council:
+
+```sh
+curl -X POST http://localhost:8000/sessions/<SESSION_ID>/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What is the riskiest assumption in this plan?",
+    "target": {
+      "type": "council"
+    },
+    "provider_override": "mock",
+    "include_moderator_summary": false
+  }'
+```
+
+Ask one persona:
+
+```sh
+curl -X POST http://localhost:8000/sessions/<SESSION_ID>/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What is the smallest useful MVP?",
+    "target": {
+      "type": "persona",
+      "persona_id": "builder"
+    },
+    "provider_override": "mock",
+    "include_moderator_summary": false
+  }'
+```
+
+Ask the council with moderator summary:
+
+```sh
+curl -X POST http://localhost:8000/sessions/<SESSION_ID>/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What should we do next?",
+    "target": {
+      "type": "council"
+    },
+    "provider_override": "mock",
     "include_moderator_summary": true
   }'
 ```

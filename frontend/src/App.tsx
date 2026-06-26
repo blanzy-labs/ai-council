@@ -55,6 +55,18 @@ type CouncilRunResult = {
   completed_at: string;
 };
 
+type ChatTargetType = "council" | "persona";
+
+type ChatResponse = {
+  session_id: string;
+  status: string;
+  user_message: CouncilMessage;
+  responses: CouncilMessage[];
+  summary?: CouncilMessage | null;
+  errors: Array<Record<string, unknown>>;
+  messages: CouncilMessage[];
+};
+
 type ProviderName = "mock" | "openai";
 
 type ProviderResponse = {
@@ -103,6 +115,36 @@ async function readApiError(response: Response) {
   return `Request failed with ${response.status}`;
 }
 
+function TranscriptView({ messages }: { messages: CouncilMessage[] }) {
+  if (messages.length === 0) {
+    return <div className="inline-note">No messages yet.</div>;
+  }
+
+  return (
+    <div className="transcript">
+      {messages.map((message) => (
+        <article
+          className={`transcript-message message-${message.role}`}
+          key={message.id}
+        >
+          <header>
+            <div>
+              <strong>{message.persona_name}</strong>
+              <span>{message.role}</span>
+            </div>
+            {(message.provider || message.model) && (
+              <span className="message-provider">
+                {[message.provider, message.model].filter(Boolean).join(" / ")}
+              </span>
+            )}
+          </header>
+          <p>{message.content}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function App() {
   const [health, setHealth] = useState<HealthStatus>({
     status: "idle",
@@ -114,8 +156,8 @@ function App() {
   const [selectedPersonaIds, setSelectedPersonaIds] = useState<string[]>(
     defaultSelectedPersonaIds,
   );
-  const [title, setTitle] = useState("Slice D test council");
-  const [topic, setTopic] = useState("Review the first non-streaming council run.");
+  const [title, setTitle] = useState("Slice E test council");
+  const [topic, setTopic] = useState("Review the chat room follow-up flow.");
   const [mode, setMode] = useState<CouncilMode>("ask_council");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [session, setSession] = useState<CouncilSession | null>(null);
@@ -127,6 +169,22 @@ function App() {
   const [isRunningCouncil, setIsRunningCouncil] = useState(false);
   const [runResult, setRunResult] = useState<CouncilRunResult | null>(null);
   const [runError, setRunError] = useState("");
+  const [transcriptMessages, setTranscriptMessages] = useState<CouncilMessage[]>(
+    [],
+  );
+  const [chatMessage, setChatMessage] = useState(
+    "What is the riskiest assumption in this plan?",
+  );
+  const [chatTargetType, setChatTargetType] =
+    useState<ChatTargetType>("council");
+  const [chatPersonaId, setChatPersonaId] = useState("");
+  const [chatProviderOverride, setChatProviderOverride] =
+    useState<ProviderName>("mock");
+  const [chatIncludeModeratorSummary, setChatIncludeModeratorSummary] =
+    useState(false);
+  const [isSendingChat, setIsSendingChat] = useState(false);
+  const [chatErrors, setChatErrors] = useState<Array<Record<string, unknown>>>([]);
+  const [chatError, setChatError] = useState("");
   const [providerPersonaId, setProviderPersonaId] = useState("skeptic");
   const [providerName, setProviderName] = useState<ProviderName>("mock");
   const [providerPrompt, setProviderPrompt] = useState(
@@ -146,6 +204,19 @@ function App() {
     [personas, selectedPersonaIds],
   );
   const selectedCount = visibleSelectedPersonaIds.length;
+  const sessionPersonas = useMemo(
+    () =>
+      session
+        ? personas.filter((persona) =>
+            session.selected_persona_ids.includes(persona.id),
+          )
+        : [],
+    [personas, session],
+  );
+  const sessionNonModeratorPersonas = useMemo(
+    () => sessionPersonas.filter((persona) => persona.id !== "moderator"),
+    [sessionPersonas],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -235,6 +306,22 @@ function App() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    if (!session) {
+      setChatPersonaId("");
+      return;
+    }
+
+    if (sessionNonModeratorPersonas.length === 0) {
+      setChatPersonaId("");
+      return;
+    }
+
+    if (!sessionNonModeratorPersonas.some((persona) => persona.id === chatPersonaId)) {
+      setChatPersonaId(sessionNonModeratorPersonas[0].id);
+    }
+  }, [chatPersonaId, session, sessionNonModeratorPersonas]);
+
   function togglePersona(personaId: string) {
     setSelectedPersonaIds((current) =>
       current.includes(personaId)
@@ -250,6 +337,9 @@ function App() {
     setSessionError("");
     setRunResult(null);
     setRunError("");
+    setTranscriptMessages([]);
+    setChatErrors([]);
+    setChatError("");
 
     try {
       const response = await fetch(`${normalizedApiBaseUrl}/sessions`, {
@@ -272,6 +362,10 @@ function App() {
       const data = (await response.json()) as CouncilSession;
       setSession(data);
       setRunMaxRounds(data.mode === "council_discussion" ? 2 : 1);
+      const firstNonModeratorPersonaId =
+        data.selected_persona_ids.find((personaId) => personaId !== "moderator") ??
+        "";
+      setChatPersonaId(firstNonModeratorPersonaId);
     } catch (error) {
       setSessionError(
         error instanceof Error ? error.message : "Could not create session.",
@@ -313,6 +407,9 @@ function App() {
 
       const data = (await response.json()) as CouncilRunResult;
       setRunResult(data);
+      setTranscriptMessages(data.messages);
+      setChatErrors(data.errors);
+      setChatError("");
       setSession((current) =>
         current ? { ...current, status: data.status } : current,
       );
@@ -322,6 +419,51 @@ function App() {
       );
     } finally {
       setIsRunningCouncil(false);
+    }
+  }
+
+  async function handleSendChat(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session) {
+      return;
+    }
+
+    setIsSendingChat(true);
+    setChatError("");
+    setChatErrors([]);
+
+    try {
+      const response = await fetch(
+        `${normalizedApiBaseUrl}/sessions/${session.id}/chat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: chatMessage,
+            target:
+              chatTargetType === "council"
+                ? { type: "council" }
+                : { type: "persona", persona_id: chatPersonaId },
+            provider_override: chatProviderOverride,
+            include_moderator_summary: chatIncludeModeratorSummary,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const data = (await response.json()) as ChatResponse;
+      setTranscriptMessages(data.messages);
+      setChatErrors(data.errors);
+      setChatMessage("");
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Chat failed.");
+    } finally {
+      setIsSendingChat(false);
     }
   }
 
@@ -559,29 +701,7 @@ function App() {
                 <span>{runResult.messages.length} messages</span>
               </div>
 
-              <div className="transcript">
-                {runResult.messages.map((message) => (
-                  <article
-                    className={`transcript-message message-${message.role}`}
-                    key={message.id}
-                  >
-                    <header>
-                      <div>
-                        <strong>{message.persona_name}</strong>
-                        <span>{message.role}</span>
-                      </div>
-                      {(message.provider || message.model) && (
-                        <span className="message-provider">
-                          {[message.provider, message.model]
-                            .filter(Boolean)
-                            .join(" / ")}
-                        </span>
-                      )}
-                    </header>
-                    <p>{message.content}</p>
-                  </article>
-                ))}
-              </div>
+              <TranscriptView messages={runResult.messages} />
 
               {runResult.errors.length > 0 && (
                 <div className="run-error-list">
@@ -595,6 +715,119 @@ function App() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {session && (
+        <section className="panel chat-panel" aria-labelledby="chat-title">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Chat room</p>
+              <h2 id="chat-title">Follow-up Chat</h2>
+            </div>
+            <span className="count-badge">
+              {transcriptMessages.length} messages
+            </span>
+          </div>
+
+          <TranscriptView messages={transcriptMessages} />
+
+          <form className="chat-form" onSubmit={handleSendChat}>
+            <label className="chat-message-field">
+              <span>Message</span>
+              <textarea
+                onChange={(event) => setChatMessage(event.target.value)}
+                placeholder="Ask a follow-up..."
+                required
+                rows={4}
+                value={chatMessage}
+              />
+            </label>
+
+            <label>
+              <span>Target</span>
+              <select
+                onChange={(event) =>
+                  setChatTargetType(event.target.value as ChatTargetType)
+                }
+                value={chatTargetType}
+              >
+                <option value="council">Ask whole council</option>
+                <option value="persona">Ask one persona</option>
+              </select>
+            </label>
+
+            {chatTargetType === "persona" && (
+              <label>
+                <span>Persona</span>
+                <select
+                  disabled={sessionNonModeratorPersonas.length === 0}
+                  onChange={(event) => setChatPersonaId(event.target.value)}
+                  required
+                  value={chatPersonaId}
+                >
+                  {sessionNonModeratorPersonas.map((persona) => (
+                    <option key={persona.id} value={persona.id}>
+                      {persona.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            <label>
+              <span>Provider override</span>
+              <select
+                onChange={(event) =>
+                  setChatProviderOverride(event.target.value as ProviderName)
+                }
+                value={chatProviderOverride}
+              >
+                <option value="mock">mock</option>
+                <option value="openai">openai</option>
+              </select>
+            </label>
+
+            <label className="checkbox-row">
+              <input
+                checked={chatIncludeModeratorSummary}
+                onChange={(event) =>
+                  setChatIncludeModeratorSummary(event.target.checked)
+                }
+                type="checkbox"
+              />
+              <span>Include moderator summary</span>
+            </label>
+
+            <button
+              disabled={
+                isSendingChat ||
+                !chatMessage.trim() ||
+                (chatTargetType === "persona" && !chatPersonaId)
+              }
+              type="submit"
+            >
+              {isSendingChat ? "Sending..." : "Send"}
+            </button>
+          </form>
+
+          {chatError && (
+            <div className="run-error" role="alert">
+              <strong>Error</strong>
+              <p>{chatError}</p>
+            </div>
+          )}
+
+          {chatErrors.length > 0 && (
+            <div className="run-error-list">
+              {chatErrors.map((error, index) => (
+                <div className="run-error" key={`${error.persona_id}-${index}`}>
+                  <strong>{String(error.persona_name ?? "Persona error")}</strong>
+                  <p>{String(error.message ?? "The persona call failed.")}</p>
+                </div>
+              ))}
             </div>
           )}
         </section>
