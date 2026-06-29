@@ -11,7 +11,9 @@ AI Council is a local-first Mythadis Labs app that will become a text-based mult
 - Controlled non-streaming council runs for `ask_council`, `council_discussion`, and `ask_one`.
 - Follow-up chat to ask the whole council or one selected persona.
 - Server-Sent Events for live run/chat activity updates.
-- Frontend panels for health, personas, session creation, council runs, live activity, chat follow-ups, and provider testing.
+- Markdown and JSON exports for the current in-memory session transcript.
+- Transcript and recent event clearing for the current in-memory session.
+- Frontend panels for health, personas, session creation, council runs, live activity, chat follow-ups, exports, transcript management, and provider testing.
 - Local development and Docker Compose workflows.
 
 Session, run, and chat transcript data is memory-only and resets when the backend process restarts.
@@ -24,7 +26,7 @@ Session, run, and chat transcript data is memory-only and resets when the backen
 - Database
 - Telemetry
 - Persistence
-- Streaming
+- Token-level provider streaming
 - Long-term history
 - Open-ended agent loops
 
@@ -172,6 +174,38 @@ Supported event statuses:
 - `completed`
 - `failed`
 
+## Export and Transcript Management
+
+Exports are generated from the current backend process memory. Restarting or refreshing the backend loses sessions, messages, events, and exportable transcript state.
+
+`POST /sessions/{session_id}/export` returns an inline export response with:
+
+- `session_id`
+- `format`
+- `filename`
+- `content_type`
+- `content`
+
+Supported export formats:
+
+- `markdown`: clean Markdown with title, metadata, transcript, optional errors, and optional recent events.
+- `json`: JSON content with session, messages, optional metadata, optional recent events, and latest run result when available.
+
+Export options:
+
+- `include_events`: include the current recent event buffer.
+- `include_metadata`: include session/export metadata.
+
+Direct download endpoints:
+
+- `GET /sessions/{session_id}/export/markdown`
+- `GET /sessions/{session_id}/export/json`
+
+Transcript management endpoints:
+
+- `DELETE /sessions/{session_id}/messages`: clears messages and the latest stored run result for that session.
+- `DELETE /sessions/{session_id}/events`: clears the recent event buffer for that session.
+
 ## API Endpoints
 
 - `GET /health`
@@ -185,8 +219,13 @@ Supported event statuses:
 - `POST /sessions/{session_id}/chat`
 - `GET /sessions/{session_id}/events`
 - `GET /sessions/{session_id}/events/recent`
+- `DELETE /sessions/{session_id}/events`
+- `POST /sessions/{session_id}/export`
+- `GET /sessions/{session_id}/export/markdown`
+- `GET /sessions/{session_id}/export/json`
 - `GET /sessions/{session_id}/result`
 - `GET /sessions/{session_id}/messages`
+- `DELETE /sessions/{session_id}/messages`
 
 Create a session:
 
@@ -313,6 +352,42 @@ Get the latest stored messages:
 curl http://localhost:8000/sessions/<SESSION_ID>/messages
 ```
 
+Create an inline Markdown export:
+
+```sh
+curl -X POST http://localhost:8000/sessions/<SESSION_ID>/export \
+  -H "Content-Type: application/json" \
+  -d '{
+    "format": "markdown",
+    "include_events": false,
+    "include_metadata": true
+  }'
+```
+
+Download Markdown:
+
+```sh
+curl -OJ http://localhost:8000/sessions/<SESSION_ID>/export/markdown
+```
+
+Download JSON:
+
+```sh
+curl -OJ http://localhost:8000/sessions/<SESSION_ID>/export/json
+```
+
+Clear transcript messages:
+
+```sh
+curl -X DELETE http://localhost:8000/sessions/<SESSION_ID>/messages
+```
+
+Clear recent events:
+
+```sh
+curl -X DELETE http://localhost:8000/sessions/<SESSION_ID>/events
+```
+
 Mock provider test:
 
 ```sh
@@ -330,8 +405,11 @@ curl -X POST http://localhost:8000/providers/test-generate \
 - Event-level streaming only
 - No token-by-token provider streaming
 - In-memory only
+- Export content is generated from current runtime memory
+- Backend restart loses sessions, messages, events, and export state
 - No voice
 - No Gemini
+- No telemetry
 - No persistence
 - No open-ended agent loops
 - No long-term chat history

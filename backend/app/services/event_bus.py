@@ -112,6 +112,11 @@ class EventBus:
         with self._lock:
             return list(self._buffers.get(session_id, []))
 
+    def clear_events(self, session_id: str) -> int:
+        with self._lock:
+            events = self._buffers.pop(session_id, [])
+            return len(events)
+
     def clear(self) -> None:
         with self._lock:
             self._buffers.clear()

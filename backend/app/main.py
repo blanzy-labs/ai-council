@@ -6,11 +6,18 @@ from contextlib import suppress
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from app.models.chat import ChatRequest, ChatResponse
 from app.models.council import CouncilMessage, CouncilRunRequest, CouncilRunResult
 from app.models.events import CouncilEvent
+from app.models.export import (
+    EventClearResponse,
+    ExportFormat,
+    ExportRequest,
+    ExportResponse,
+    TranscriptClearResponse,
+)
 from app.models.persona import Persona
 from app.models.provider import (
     ProviderError,
@@ -23,12 +30,17 @@ from app.providers.factory import get_provider
 from app.services.chat_orchestrator import ChatOrchestrator
 from app.services.council_orchestrator import CouncilOrchestrator
 from app.services.event_bus import event_bus
+from app.services.export_service import ExportService
 from app.services.persona_registry import persona_registry
 from app.services.session_store import session_store
 from app.services.transcript_store import transcript_store
 
 
 SSE_HEARTBEAT_SECONDS = 15.0
+export_service = ExportService(
+    transcript_store=transcript_store,
+    event_bus=event_bus,
+)
 
 
 def _cors_origins() -> list[str]:
@@ -56,7 +68,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -258,6 +270,23 @@ def get_recent_session_events(session_id: str) -> list[CouncilEvent]:
     return event_bus.list_events(session_id)
 
 
+@app.delete("/sessions/{session_id}/events", response_model=EventClearResponse)
+def clear_session_events(session_id: str) -> EventClearResponse:
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found.",
+        )
+
+    event_bus.clear_events(session_id)
+    return EventClearResponse(
+        session_id=session_id,
+        cleared=True,
+        event_count=0,
+    )
+
+
 def _format_sse_event(event: CouncilEvent) -> str:
     payload = json.dumps(event.model_dump(mode="json"))
     return f"event: {event.type}\ndata: {payload}\n\n"
@@ -317,6 +346,69 @@ async def stream_session_events(session_id: str) -> StreamingResponse:
     )
 
 
+def _download_response(export_response: ExportResponse) -> Response:
+    return Response(
+        content=export_response.content,
+        media_type=export_response.content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{export_response.filename}"',
+        },
+    )
+
+
+def _generate_download_export(
+    session: CouncilSession,
+    export_format: ExportFormat,
+) -> ExportResponse:
+    return export_service.generate_export(
+        session,
+        ExportRequest(
+            format=export_format,
+            include_events=False,
+            include_metadata=True,
+        ),
+    )
+
+
+@app.post("/sessions/{session_id}/export", response_model=ExportResponse)
+def export_session(
+    session_id: str,
+    export_request: ExportRequest,
+) -> ExportResponse:
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found.",
+        )
+
+    return export_service.generate_export(session, export_request)
+
+
+@app.get("/sessions/{session_id}/export/markdown")
+def download_session_markdown_export(session_id: str) -> Response:
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found.",
+        )
+
+    return _download_response(_generate_download_export(session, "markdown"))
+
+
+@app.get("/sessions/{session_id}/export/json")
+def download_session_json_export(session_id: str) -> Response:
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found.",
+        )
+
+    return _download_response(_generate_download_export(session, "json"))
+
+
 @app.get("/sessions/{session_id}/result", response_model=CouncilRunResult)
 def get_session_result(session_id: str) -> CouncilRunResult:
     session = session_store.get_session(session_id)
@@ -334,6 +426,23 @@ def get_session_result(session_id: str) -> CouncilRunResult:
         )
 
     return result
+
+
+@app.delete("/sessions/{session_id}/messages", response_model=TranscriptClearResponse)
+def clear_session_messages(session_id: str) -> TranscriptClearResponse:
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found.",
+        )
+
+    transcript_store.clear_messages(session_id)
+    return TranscriptClearResponse(
+        session_id=session_id,
+        cleared=True,
+        message_count=0,
+    )
 
 
 @app.get("/sessions/{session_id}/messages", response_model=list[CouncilMessage])

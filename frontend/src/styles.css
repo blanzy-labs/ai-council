@@ -37,6 +37,7 @@ button {
   color: #0f172a;
   cursor: pointer;
   font-weight: 800;
+  padding: 0 1rem;
 }
 
 button:disabled {
@@ -281,7 +282,8 @@ h2 {
 .session-form,
 .provider-form,
 .run-form,
-.chat-form {
+.chat-form,
+.export-form {
   display: grid;
   gap: 1rem;
 }
@@ -289,7 +291,8 @@ h2 {
 .session-form label,
 .provider-form label,
 .run-form label,
-.chat-form label {
+.chat-form label,
+.export-form label {
   display: grid;
   gap: 0.45rem;
   color: #cbd5e1;
@@ -309,6 +312,14 @@ h2 {
 
 .chat-form {
   grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(160px, 0.5fr);
+  align-items: end;
+}
+
+.export-form {
+  grid-template-columns:
+    minmax(150px, 0.8fr)
+    repeat(2, minmax(160px, 1fr))
+    repeat(3, minmax(140px, 0.8fr));
   align-items: end;
 }
 
@@ -347,7 +358,8 @@ h2 {
 .session-result,
 .provider-result,
 .run-error,
-.run-result {
+.run-result,
+.export-result {
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 8px;
   background: rgba(2, 6, 23, 0.46);
@@ -369,7 +381,8 @@ h2 {
 .session-result,
 .provider-result,
 .run-error,
-.run-result {
+.run-result,
+.export-result {
   display: grid;
   gap: 0.3rem;
   padding: 0.95rem;
@@ -409,6 +422,37 @@ h2 {
 
 .run-result {
   gap: 1rem;
+}
+
+.management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.management-actions button {
+  min-width: 12rem;
+}
+
+.export-result {
+  gap: 1rem;
+}
+
+.export-result .provider-meta {
+  align-items: center;
+}
+
+.export-result .provider-meta button {
+  min-height: 2rem;
+  padding: 0 0.75rem;
+}
+
+.export-output {
+  min-height: 22rem;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  white-space: pre;
 }
 
 .transcript {
@@ -521,7 +565,8 @@ h2 {
   .health-panel,
   .provider-form,
   .run-form,
-  .chat-form {
+  .chat-form,
+  .export-form {
     grid-template-columns: 1fr;
   }
 

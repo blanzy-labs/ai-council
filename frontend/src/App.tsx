@@ -106,6 +106,16 @@ type ProviderResponse = {
   finish_reason?: string | null;
 };
 
+type ExportFormat = "markdown" | "json";
+
+type SessionExportResponse = {
+  session_id: string;
+  format: ExportFormat;
+  filename: string;
+  content_type: string;
+  content: string;
+};
+
 type LoadStatus = "idle" | "loading" | "ok" | "error";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -258,6 +268,18 @@ function App() {
   const [liveEvents, setLiveEvents] = useState<CouncilEvent[]>([]);
   const [eventConnectionStatus, setEventConnectionStatus] =
     useState("idle");
+  const [exportFormat, setExportFormat] =
+    useState<ExportFormat>("markdown");
+  const [exportIncludeEvents, setExportIncludeEvents] = useState(false);
+  const [exportIncludeMetadata, setExportIncludeMetadata] = useState(true);
+  const [isGeneratingExport, setIsGeneratingExport] = useState(false);
+  const [exportResponse, setExportResponse] =
+    useState<SessionExportResponse | null>(null);
+  const [exportError, setExportError] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
+  const [isClearingTranscript, setIsClearingTranscript] = useState(false);
+  const [isClearingEvents, setIsClearingEvents] = useState(false);
+  const [managementError, setManagementError] = useState("");
   const [providerPersonaId, setProviderPersonaId] = useState("skeptic");
   const [providerName, setProviderName] = useState<ProviderName>("mock");
   const [providerPrompt, setProviderPrompt] = useState(
@@ -468,6 +490,10 @@ function App() {
     setChatErrors([]);
     setChatError("");
     setLiveEvents([]);
+    setExportResponse(null);
+    setExportError("");
+    setCopyStatus("");
+    setManagementError("");
 
     try {
       const response = await fetch(`${normalizedApiBaseUrl}/sessions`, {
@@ -512,6 +538,8 @@ function App() {
     setIsRunningCouncil(true);
     setRunResult(null);
     setRunError("");
+    setExportResponse(null);
+    setCopyStatus("");
 
     try {
       const response = await fetch(
@@ -588,10 +616,159 @@ function App() {
       setTranscriptMessages(data.messages);
       setChatErrors(data.errors);
       setChatMessage("");
+      setExportResponse(null);
+      setCopyStatus("");
     } catch (error) {
       setChatError(error instanceof Error ? error.message : "Chat failed.");
     } finally {
       setIsSendingChat(false);
+    }
+  }
+
+  async function handleGenerateExport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session) {
+      return;
+    }
+
+    setIsGeneratingExport(true);
+    setExportError("");
+    setCopyStatus("");
+
+    try {
+      const response = await fetch(
+        `${normalizedApiBaseUrl}/sessions/${session.id}/export`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            format: exportFormat,
+            include_events: exportIncludeEvents,
+            include_metadata: exportIncludeMetadata,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const data = (await response.json()) as SessionExportResponse;
+      setExportResponse(data);
+    } catch (error) {
+      setExportError(
+        error instanceof Error ? error.message : "Could not generate export.",
+      );
+    } finally {
+      setIsGeneratingExport(false);
+    }
+  }
+
+  function handleDownloadExport(format: ExportFormat) {
+    if (!session) {
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = `${normalizedApiBaseUrl}/sessions/${session.id}/export/${format}`;
+    link.rel = "noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  async function handleCopyExport() {
+    if (!exportResponse) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(exportResponse.content);
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus("Copy failed");
+    }
+  }
+
+  async function handleClearTranscript() {
+    if (!session) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Clear the transcript for this in-memory session?",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsClearingTranscript(true);
+    setManagementError("");
+
+    try {
+      const response = await fetch(
+        `${normalizedApiBaseUrl}/sessions/${session.id}/messages`,
+        {
+          method: "DELETE",
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      setTranscriptMessages([]);
+      setRunResult(null);
+      setChatErrors([]);
+      setExportResponse(null);
+      setCopyStatus("");
+    } catch (error) {
+      setManagementError(
+        error instanceof Error ? error.message : "Could not clear transcript.",
+      );
+    } finally {
+      setIsClearingTranscript(false);
+    }
+  }
+
+  async function handleClearEvents() {
+    if (!session) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Clear recent live events for this in-memory session?",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsClearingEvents(true);
+    setManagementError("");
+
+    try {
+      const response = await fetch(
+        `${normalizedApiBaseUrl}/sessions/${session.id}/events`,
+        {
+          method: "DELETE",
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      setLiveEvents([]);
+      setExportResponse(null);
+      setCopyStatus("");
+    } catch (error) {
+      setManagementError(
+        error instanceof Error ? error.message : "Could not clear events.",
+      );
+    } finally {
+      setIsClearingEvents(false);
     }
   }
 
@@ -993,6 +1170,118 @@ function App() {
                   <p>{String(error.message ?? "The persona call failed.")}</p>
                 </div>
               ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {session && (
+        <section className="panel export-panel" aria-labelledby="export-title">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Session archive</p>
+              <h2 id="export-title">Export Session</h2>
+            </div>
+            <span className="count-badge">{exportFormat}</span>
+          </div>
+
+          <form className="export-form" onSubmit={handleGenerateExport}>
+            <label>
+              <span>Format</span>
+              <select
+                onChange={(event) =>
+                  setExportFormat(event.target.value as ExportFormat)
+                }
+                value={exportFormat}
+              >
+                <option value="markdown">Markdown</option>
+                <option value="json">JSON</option>
+              </select>
+            </label>
+
+            <label className="checkbox-row">
+              <input
+                checked={exportIncludeEvents}
+                onChange={(event) =>
+                  setExportIncludeEvents(event.target.checked)
+                }
+                type="checkbox"
+              />
+              <span>Include events</span>
+            </label>
+
+            <label className="checkbox-row">
+              <input
+                checked={exportIncludeMetadata}
+                onChange={(event) =>
+                  setExportIncludeMetadata(event.target.checked)
+                }
+                type="checkbox"
+              />
+              <span>Include metadata</span>
+            </label>
+
+            <button disabled={isGeneratingExport} type="submit">
+              {isGeneratingExport ? "Generating..." : "Generate Export"}
+            </button>
+
+            <button
+              onClick={() => handleDownloadExport("markdown")}
+              type="button"
+            >
+              Download Markdown
+            </button>
+
+            <button onClick={() => handleDownloadExport("json")} type="button">
+              Download JSON
+            </button>
+          </form>
+
+          <div className="management-actions">
+            <button
+              disabled={isClearingTranscript}
+              onClick={handleClearTranscript}
+              type="button"
+            >
+              {isClearingTranscript ? "Clearing..." : "Clear Transcript"}
+            </button>
+            <button
+              disabled={isClearingEvents}
+              onClick={handleClearEvents}
+              type="button"
+            >
+              {isClearingEvents ? "Clearing..." : "Clear Events"}
+            </button>
+          </div>
+
+          {exportError && (
+            <div className="run-error" role="alert">
+              <strong>Error</strong>
+              <p>{exportError}</p>
+            </div>
+          )}
+
+          {managementError && (
+            <div className="run-error" role="alert">
+              <strong>Error</strong>
+              <p>{managementError}</p>
+            </div>
+          )}
+
+          {exportResponse && (
+            <div className="export-result" role="status">
+              <div className="provider-meta">
+                <span>{exportResponse.filename}</span>
+                <span>{exportResponse.content_type}</span>
+                <button onClick={handleCopyExport} type="button">
+                  {copyStatus || "Copy"}
+                </button>
+              </div>
+              <textarea
+                className="export-output"
+                readOnly
+                value={exportResponse.content}
+              />
             </div>
           )}
         </section>

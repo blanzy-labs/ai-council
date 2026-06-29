@@ -49,6 +49,12 @@ class TranscriptStore:
             return None
         return list(messages)
 
+    def clear_messages(self, session_id: str) -> int:
+        with self._lock:
+            messages = self._messages.pop(session_id, [])
+            self._results.pop(session_id, None)
+            return len(messages)
+
     def clear(self) -> None:
         with self._lock:
             self._results.clear()
