@@ -1,10 +1,11 @@
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import _session_event_stream, app
 from app.models.events import CouncilEvent
-from app.services.event_bus import EventBus
+from app.services.event_bus import EventBus, event_bus
 
 
 client = TestClient(app)
@@ -157,3 +158,34 @@ def test_recent_events_unknown_session_returns_404() -> None:
     response = client.get("/sessions/session-9999/events/recent")
 
     assert response.status_code == 404
+
+
+def test_event_stream_keeps_subscription_after_heartbeat() -> None:
+    event_bus.publish_event(
+        "session-0001",
+        "run_started",
+        "started",
+        "Council run started.",
+    )
+
+    async def collect_stream_chunks() -> tuple[str, str, str]:
+        stream = _session_event_stream("session-0001", heartbeat_seconds=0.01)
+        try:
+            first_event = await asyncio.wait_for(anext(stream), timeout=1)
+            heartbeat = await asyncio.wait_for(anext(stream), timeout=1)
+            event_bus.publish_event(
+                "session-0001",
+                "run_completed",
+                "completed",
+                "Council run completed.",
+            )
+            second_event = await asyncio.wait_for(anext(stream), timeout=1)
+            return first_event, heartbeat, second_event
+        finally:
+            await stream.aclose()
+
+    first_event, heartbeat, second_event = asyncio.run(collect_stream_chunks())
+
+    assert "event: run_started" in first_event
+    assert heartbeat == ": heartbeat\n\n"
+    assert "event: run_completed" in second_event

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+from collections.abc import AsyncGenerator
+from contextlib import suppress
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +26,9 @@ from app.services.event_bus import event_bus
 from app.services.persona_registry import persona_registry
 from app.services.session_store import session_store
 from app.services.transcript_store import transcript_store
+
+
+SSE_HEARTBEAT_SECONDS = 15.0
 
 
 def _cors_origins() -> list[str]:
@@ -253,6 +258,46 @@ def get_recent_session_events(session_id: str) -> list[CouncilEvent]:
     return event_bus.list_events(session_id)
 
 
+def _format_sse_event(event: CouncilEvent) -> str:
+    payload = json.dumps(event.model_dump(mode="json"))
+    return f"event: {event.type}\ndata: {payload}\n\n"
+
+
+async def _session_event_stream(
+    session_id: str,
+    heartbeat_seconds: float = SSE_HEARTBEAT_SECONDS,
+) -> AsyncGenerator[str, None]:
+    subscription = event_bus.subscribe(session_id, include_recent=True)
+    next_event_task = asyncio.create_task(anext(subscription))
+
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                {next_event_task},
+                timeout=heartbeat_seconds,
+            )
+            if not done:
+                yield ": heartbeat\n\n"
+                continue
+
+            try:
+                event = next_event_task.result()
+            except StopAsyncIteration:
+                return
+
+            yield _format_sse_event(event)
+            next_event_task = asyncio.create_task(anext(subscription))
+    except asyncio.CancelledError:
+        return
+    finally:
+        if not next_event_task.done():
+            next_event_task.cancel()
+            with suppress(asyncio.CancelledError, StopAsyncIteration):
+                await next_event_task
+        with suppress(RuntimeError):
+            await subscription.aclose()
+
+
 @app.get("/sessions/{session_id}/events")
 async def stream_session_events(session_id: str) -> StreamingResponse:
     session = session_store.get_session(session_id)
@@ -262,28 +307,8 @@ async def stream_session_events(session_id: str) -> StreamingResponse:
             detail=f"Session '{session_id}' not found.",
         )
 
-    async def event_stream():
-        subscription = event_bus.subscribe(session_id, include_recent=True)
-        try:
-            while True:
-                try:
-                    event = await asyncio.wait_for(
-                        anext(subscription),
-                        timeout=15,
-                    )
-                except TimeoutError:
-                    yield ": heartbeat\n\n"
-                    continue
-
-                payload = json.dumps(event.model_dump(mode="json"))
-                yield f"event: {event.type}\ndata: {payload}\n\n"
-        except asyncio.CancelledError:
-            return
-        finally:
-            await subscription.aclose()
-
     return StreamingResponse(
-        event_stream(),
+        _session_event_stream(session_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
