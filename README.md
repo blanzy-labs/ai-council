@@ -139,7 +139,8 @@ Optional real OpenAI smoke test:
 
 ```sh
 cd backend
-RUN_OPENAI_INTEGRATION_TESTS=1 OPENAI_API_KEY=sk-... uv run pytest tests/test_openai_integration.py -m integration
+# Set OPENAI_API_KEY in your shell first.
+RUN_OPENAI_INTEGRATION_TESTS=1 uv run pytest tests/test_openai_integration.py -m integration
 ```
 
 Normal tests skip real OpenAI calls.
@@ -342,6 +343,8 @@ CORS/local URL issues:
 
 - [v0.1.0 scope](docs/v0.1.0-scope.md)
 - [release notes](docs/release-notes/v0.1.0.md)
+- [GitHub release notes](docs/github-release-notes.md)
+- [demo guide](docs/demo.md)
 - [validation checklist](docs/validation/v0.1.0-validation.md)
 - [architecture notes](docs/architecture.md)
 - [security and privacy notes](docs/security-and-privacy.md)

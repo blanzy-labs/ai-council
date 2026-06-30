@@ -42,5 +42,5 @@ Do not run this automatically.
 ```sh
 gh release create v0.1.0 \
   --title "v0.1.0 - Local Council MVP" \
-  --notes-file docs/release-notes/v0.1.0.md
+  --notes-file docs/github-release-notes.md
 ```
