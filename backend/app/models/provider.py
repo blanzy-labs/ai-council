@@ -45,7 +45,7 @@ class ProviderResponse(BaseModel):
 class ProviderTestGenerateRequest(BaseModel):
     provider: str | None = None
     persona_id: str = Field(min_length=1)
-    user_prompt: str = Field(min_length=1)
+    user_prompt: str = Field(min_length=1, max_length=4000)
     model: str | None = None
 
     @field_validator("provider", "model")

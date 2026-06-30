@@ -36,6 +36,7 @@ from app.services.session_store import session_store
 from app.services.transcript_store import transcript_store
 
 
+APP_VERSION = "0.1.0"
 SSE_HEARTBEAT_SECONDS = 15.0
 export_service = ExportService(
     transcript_store=transcript_store,
@@ -62,7 +63,11 @@ def _cors_origins() -> list[str]:
     return origins
 
 
-app = FastAPI(title="AI Council Backend", version="0.1.0")
+app = FastAPI(
+    title="AI Council",
+    version=APP_VERSION,
+    description="Local-first multi-persona AI council room",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,6 +83,29 @@ def health() -> dict[str, str]:
     return {
         "status": "ok",
         "service": "ai-council-backend",
+    }
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "service": "ai-council-backend",
+        "version": APP_VERSION,
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
+@app.get("/version")
+def version() -> dict[str, object]:
+    return {
+        "service": "ai-council",
+        "version": APP_VERSION,
+        "provider_support": ["openai", "mock"],
+        "voice": False,
+        "gemini": False,
+        "persistence": False,
     }
 
 
@@ -148,6 +176,16 @@ def test_generate_provider(
     status_code=status.HTTP_201_CREATED,
 )
 def create_session(session_create: CouncilSessionCreate) -> CouncilSession:
+    available_persona_count = len(persona_registry.list_personas())
+    if len(session_create.selected_persona_ids) > available_persona_count:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Too many personas selected.",
+                "max_selected_personas": available_persona_count,
+            },
+        )
+
     unknown_persona_ids = persona_registry.unknown_persona_ids(
         session_create.selected_persona_ids
     )

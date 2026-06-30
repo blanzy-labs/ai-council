@@ -155,6 +155,18 @@ async function readApiError(response: Response) {
       return body.detail;
     }
     if (body.detail) {
+      if (
+        typeof body.detail === "object" &&
+        body.detail.error_type === "missing_api_key"
+      ) {
+        return "OpenAI API key is not configured. Switch to mock or set OPENAI_API_KEY.";
+      }
+      if (
+        typeof body.detail === "object" &&
+        typeof body.detail.message === "string"
+      ) {
+        return body.detail.message;
+      }
       return JSON.stringify(body.detail);
     }
   } catch {
@@ -164,9 +176,28 @@ async function readApiError(response: Response) {
   return `Request failed with ${response.status}`;
 }
 
-function TranscriptView({ messages }: { messages: CouncilMessage[] }) {
+function roleLabel(role: CouncilMessage["role"]) {
+  if (role === "user") {
+    return "You";
+  }
+  if (role === "moderator") {
+    return "Moderator";
+  }
+  if (role === "persona") {
+    return "Persona";
+  }
+  return "System";
+}
+
+function TranscriptView({
+  messages,
+  emptyText = "No transcript messages yet.",
+}: {
+  messages: CouncilMessage[];
+  emptyText?: string;
+}) {
   if (messages.length === 0) {
-    return <div className="inline-note">No messages yet.</div>;
+    return <div className="inline-note empty-state">{emptyText}</div>;
   }
 
   return (
@@ -179,7 +210,7 @@ function TranscriptView({ messages }: { messages: CouncilMessage[] }) {
           <header>
             <div>
               <strong>{message.persona_name}</strong>
-              <span>{message.role}</span>
+              <span>{roleLabel(message.role)}</span>
             </div>
             {(message.provider || message.model) && (
               <span className="message-provider">
@@ -279,6 +310,8 @@ function App() {
   const [copyStatus, setCopyStatus] = useState("");
   const [isClearingTranscript, setIsClearingTranscript] = useState(false);
   const [isClearingEvents, setIsClearingEvents] = useState(false);
+  const [isRefreshingMessages, setIsRefreshingMessages] = useState(false);
+  const [isRefreshingEvents, setIsRefreshingEvents] = useState(false);
   const [managementError, setManagementError] = useState("");
   const [providerPersonaId, setProviderPersonaId] = useState("skeptic");
   const [providerName, setProviderName] = useState<ProviderName>("mock");
@@ -312,6 +345,18 @@ function App() {
     () => sessionPersonas.filter((persona) => persona.id !== "moderator"),
     [sessionPersonas],
   );
+  const visibleLiveEvents = useMemo(
+    () => liveEvents.slice(-30).reverse(),
+    [liveEvents],
+  );
+  const isAnySessionActionBusy =
+    isRunningCouncil ||
+    isSendingChat ||
+    isGeneratingExport ||
+    isClearingTranscript ||
+    isClearingEvents ||
+    isRefreshingMessages ||
+    isRefreshingEvents;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -692,6 +737,67 @@ function App() {
     }
   }
 
+  async function handleRefreshMessages() {
+    if (!session) {
+      return;
+    }
+
+    setIsRefreshingMessages(true);
+    setManagementError("");
+
+    try {
+      const response = await fetch(
+        `${normalizedApiBaseUrl}/sessions/${session.id}/messages`,
+      );
+
+      if (response.status === 404) {
+        setTranscriptMessages([]);
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const data = (await response.json()) as CouncilMessage[];
+      setTranscriptMessages(data);
+    } catch (error) {
+      setManagementError(
+        error instanceof Error ? error.message : "Could not refresh messages.",
+      );
+    } finally {
+      setIsRefreshingMessages(false);
+    }
+  }
+
+  async function handleRefreshEvents() {
+    if (!session) {
+      return;
+    }
+
+    setIsRefreshingEvents(true);
+    setManagementError("");
+
+    try {
+      const response = await fetch(
+        `${normalizedApiBaseUrl}/sessions/${session.id}/events/recent`,
+      );
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const data = (await response.json()) as CouncilEvent[];
+      setLiveEvents(data);
+    } catch (error) {
+      setManagementError(
+        error instanceof Error ? error.message : "Could not refresh events.",
+      );
+    } finally {
+      setIsRefreshingEvents(false);
+    }
+  }
+
   async function handleClearTranscript() {
     if (!session) {
       return;
@@ -810,9 +916,17 @@ function App() {
     <main className="app-shell">
       <section className="intro">
         <p className="eyebrow">Mythadis Labs</p>
-        <h1>AI Council</h1>
+        <div className="intro-title">
+          <h1>AI Council</h1>
+          <span className="version-badge">v0.1.0</span>
+        </div>
         <p className="tagline">Local text-based multi-persona council room</p>
-        <p className="scope">v0.1.0: OpenAI-only, no voice</p>
+        <div className="scope-badges" aria-label="v0.1.0 scope">
+          <span>OpenAI-only</span>
+          <span>No voice</span>
+          <span>Local-first</span>
+          <span>In-memory</span>
+        </div>
       </section>
 
       <section className="health-panel" aria-labelledby="health-title">
@@ -827,6 +941,11 @@ function App() {
             <span>{health.service ?? healthUrl}</span>
           </div>
         </div>
+        {health.status === "error" && (
+          <div className="inline-note inline-note-error">
+            Backend unreachable at {healthUrl}.
+          </div>
+        )}
       </section>
 
       <section className="workspace-grid">
@@ -874,8 +993,8 @@ function App() {
         <section className="panel session-panel" aria-labelledby="session-title">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Session</p>
-              <h2 id="session-title">Create Test Council Session</h2>
+              <p className="eyebrow">Step 1</p>
+              <h2 id="session-title">Create Session</h2>
             </div>
             <span className="count-badge">{selectedCount} selected</span>
           </div>
@@ -885,6 +1004,7 @@ function App() {
               <span>Title</span>
               <input
                 onChange={(event) => setTitle(event.target.value)}
+                maxLength={120}
                 required
                 type="text"
                 value={title}
@@ -895,6 +1015,7 @@ function App() {
               <span>Topic</span>
               <textarea
                 onChange={(event) => setTopic(event.target.value)}
+                maxLength={4000}
                 required
                 rows={4}
                 value={topic}
@@ -940,11 +1061,29 @@ function App() {
         </section>
       </section>
 
+      {!session && (
+        <section className="panel empty-workflow" aria-labelledby="workflow-title">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Workflow</p>
+              <h2 id="workflow-title">No session created</h2>
+            </div>
+            <span className="count-badge">Ready</span>
+          </div>
+          <div className="workflow-steps">
+            <span>Create session</span>
+            <span>Run council</span>
+            <span>Continue chat</span>
+            <span>Export</span>
+          </div>
+        </section>
+      )}
+
       {session && (
         <section className="panel run-panel" aria-labelledby="run-title">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Council run</p>
+              <p className="eyebrow">Step 2</p>
               <h2 id="run-title">Run Council</h2>
             </div>
             <span className="count-badge">{session.id}</span>
@@ -986,16 +1125,26 @@ function App() {
               <span>Include moderator summary</span>
             </label>
 
-            <button disabled={isRunningCouncil} type="submit">
+            <button disabled={isAnySessionActionBusy} type="submit">
               {isRunningCouncil ? "Running..." : "Run Council"}
             </button>
           </form>
+
+          {runProviderOverride === "openai" && (
+            <div className="inline-note">
+              OpenAI runs require OPENAI_API_KEY. Mock runs work without one.
+            </div>
+          )}
 
           {runError && (
             <div className="run-error" role="alert">
               <strong>Error</strong>
               <p>{runError}</p>
             </div>
+          )}
+
+          {!runResult && !isRunningCouncil && (
+            <div className="inline-note empty-state">No council run yet.</div>
           )}
 
           {runResult && (
@@ -1032,22 +1181,35 @@ function App() {
               <p className="eyebrow">Live stream</p>
               <h2 id="events-title">Activity</h2>
             </div>
-            <span className="count-badge">{eventConnectionStatus}</span>
+            <div className="panel-actions">
+              <button
+                disabled={isRefreshingEvents}
+                onClick={handleRefreshEvents}
+                type="button"
+              >
+                {isRefreshingEvents ? "Refreshing..." : "Refresh Events"}
+              </button>
+              <span className="count-badge">{eventConnectionStatus}</span>
+            </div>
           </div>
 
           <div className="event-list" role="log" aria-live="polite">
             {liveEvents.length === 0 && (
-              <div className="inline-note">Waiting for session events...</div>
+              <div className="inline-note empty-state">
+                No live events yet.
+              </div>
             )}
 
-            {liveEvents.map((event) => (
+            {visibleLiveEvents.map((event) => (
               <article
                 className={`event-row event-${event.status}`}
                 key={event.id}
               >
                 <div>
                   <strong>{event.message}</strong>
-                  <span>{event.type}</span>
+                  <span>
+                    {event.type.replace(/_/g, " ")} / {event.status}
+                  </span>
                 </div>
                 {(event.persona_name || event.provider || event.model) && (
                   <span className="event-meta">
@@ -1066,21 +1228,34 @@ function App() {
         <section className="panel chat-panel" aria-labelledby="chat-title">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Chat room</p>
+              <p className="eyebrow">Step 3</p>
               <h2 id="chat-title">Follow-up Chat</h2>
             </div>
-            <span className="count-badge">
-              {transcriptMessages.length} messages
-            </span>
+            <div className="panel-actions">
+              <button
+                disabled={isRefreshingMessages}
+                onClick={handleRefreshMessages}
+                type="button"
+              >
+                {isRefreshingMessages ? "Refreshing..." : "Refresh Messages"}
+              </button>
+              <span className="count-badge">
+                {transcriptMessages.length} messages
+              </span>
+            </div>
           </div>
 
-          <TranscriptView messages={transcriptMessages} />
+          <TranscriptView
+            messages={transcriptMessages}
+            emptyText="No transcript yet."
+          />
 
           <form className="chat-form" onSubmit={handleSendChat}>
             <label className="chat-message-field">
               <span>Message</span>
               <textarea
                 onChange={(event) => setChatMessage(event.target.value)}
+                maxLength={4000}
                 placeholder="Ask a follow-up..."
                 required
                 rows={4}
@@ -1145,7 +1320,7 @@ function App() {
 
             <button
               disabled={
-                isSendingChat ||
+                isAnySessionActionBusy ||
                 !chatMessage.trim() ||
                 (chatTargetType === "persona" && !chatPersonaId)
               }
@@ -1179,7 +1354,7 @@ function App() {
         <section className="panel export-panel" aria-labelledby="export-title">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Session archive</p>
+              <p className="eyebrow">Step 4</p>
               <h2 id="export-title">Export Session</h2>
             </div>
             <span className="count-badge">{exportFormat}</span>
@@ -1221,32 +1396,37 @@ function App() {
               <span>Include metadata</span>
             </label>
 
-            <button disabled={isGeneratingExport} type="submit">
+            <button disabled={isAnySessionActionBusy} type="submit">
               {isGeneratingExport ? "Generating..." : "Generate Export"}
             </button>
 
             <button
+              disabled={isAnySessionActionBusy}
               onClick={() => handleDownloadExport("markdown")}
               type="button"
             >
               Download Markdown
             </button>
 
-            <button onClick={() => handleDownloadExport("json")} type="button">
+            <button
+              disabled={isAnySessionActionBusy}
+              onClick={() => handleDownloadExport("json")}
+              type="button"
+            >
               Download JSON
             </button>
           </form>
 
           <div className="management-actions">
             <button
-              disabled={isClearingTranscript}
+              disabled={isAnySessionActionBusy || transcriptMessages.length === 0}
               onClick={handleClearTranscript}
               type="button"
             >
               {isClearingTranscript ? "Clearing..." : "Clear Transcript"}
             </button>
             <button
-              disabled={isClearingEvents}
+              disabled={isAnySessionActionBusy || liveEvents.length === 0}
               onClick={handleClearEvents}
               type="button"
             >
@@ -1266,6 +1446,10 @@ function App() {
               <strong>Error</strong>
               <p>{managementError}</p>
             </div>
+          )}
+
+          {!exportResponse && (
+            <div className="inline-note empty-state">No export generated yet.</div>
           )}
 
           {exportResponse && (
@@ -1328,6 +1512,7 @@ function App() {
             <span>User prompt</span>
             <textarea
               onChange={(event) => setProviderPrompt(event.target.value)}
+              maxLength={4000}
               required
               rows={4}
               value={providerPrompt}
@@ -1346,6 +1531,12 @@ function App() {
             {isTestingProvider ? "Testing..." : "Test Provider"}
           </button>
         </form>
+
+        {providerName === "openai" && (
+          <div className="inline-note">
+            OpenAI provider tests require OPENAI_API_KEY. Mock provider tests do not.
+          </div>
+        )}
 
         {providerResponse && (
           <div className="provider-result" role="status">

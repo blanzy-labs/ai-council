@@ -99,6 +99,19 @@ def test_test_generate_rejects_empty_user_prompt() -> None:
     assert response.status_code == 422
 
 
+def test_test_generate_rejects_overly_long_user_prompt() -> None:
+    response = client.post(
+        "/providers/test-generate",
+        json={
+            "provider": "mock",
+            "persona_id": "skeptic",
+            "user_prompt": "x" * 4001,
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_test_generate_with_openai_and_no_api_key_returns_clean_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -9,8 +9,8 @@ SessionStatus = Literal["created", "active", "completed", "failed"]
 
 
 class CouncilSessionCreate(BaseModel):
-    title: str = Field(min_length=1)
-    topic: str = Field(min_length=1)
+    title: str = Field(min_length=1, max_length=120)
+    topic: str = Field(min_length=1, max_length=4000)
     mode: CouncilMode
     selected_persona_ids: list[str] = Field(min_length=1)
 

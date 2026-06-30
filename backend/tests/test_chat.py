@@ -215,6 +215,21 @@ def test_chat_rejects_empty_message() -> None:
     assert response.status_code == 422
 
 
+def test_chat_rejects_overly_long_message() -> None:
+    session = create_session()
+
+    response = client.post(
+        f"/sessions/{session['id']}/chat",
+        json={
+            "message": "x" * 4001,
+            "target": {"type": "council"},
+            "provider_override": "mock",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_chat_rejects_unsupported_provider_override() -> None:
     session = create_session()
 

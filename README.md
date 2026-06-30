@@ -4,6 +4,9 @@ AI Council is a local-first Mythadis Labs app that will become a text-based mult
 
 ## v0.1.0 Scope
 
+- Local-first, in-memory text council for public testing and demos.
+- Provider support: OpenAI and deterministic mock.
+- Mock mode for testing without `OPENAI_API_KEY`.
 - OpenAI-only configuration shape.
 - OpenAI provider adapter and deterministic mock provider.
 - Default persona registry exposed by the API.
@@ -17,6 +20,13 @@ AI Council is a local-first Mythadis Labs app that will become a text-based mult
 - Local development and Docker Compose workflows.
 
 Session, run, and chat transcript data is memory-only and resets when the backend process restarts.
+
+## UI Workflow
+
+1. Create a session.
+2. Run council.
+3. Continue chat.
+4. Export.
 
 ## Intentionally Out of Scope
 
@@ -209,6 +219,8 @@ Transcript management endpoints:
 ## API Endpoints
 
 - `GET /health`
+- `GET /`
+- `GET /version`
 - `GET /personas`
 - `GET /personas/{persona_id}`
 - `POST /providers/test-generate`
@@ -388,6 +400,13 @@ Clear recent events:
 curl -X DELETE http://localhost:8000/sessions/<SESSION_ID>/events
 ```
 
+Backend metadata:
+
+```sh
+curl http://localhost:8000/
+curl http://localhost:8000/version
+```
+
 Mock provider test:
 
 ```sh
@@ -414,6 +433,39 @@ curl -X POST http://localhost:8000/providers/test-generate \
 - No open-ended agent loops
 - No long-term chat history
 - No authentication
+- Voice is planned for v0.2.0, not v0.1.0
+- Gemini provider support is planned for v0.3.0, not v0.1.0
+
+## Troubleshooting
+
+Backend unreachable:
+
+- Confirm the API is running at http://localhost:8000.
+- Check `curl http://localhost:8000/health`.
+- If using Docker, confirm Docker is running and use `docker compose ps`.
+
+Docker not running:
+
+- Start Docker Desktop or your Docker daemon, then rerun `docker compose up --build`.
+
+Ports already in use:
+
+- Stop the process using port `8000` or `5173`, or change the exposed ports in Docker Compose for local testing.
+
+OpenAI key missing:
+
+- Mock mode works without a key.
+- Real OpenAI calls require `OPENAI_API_KEY` in your environment or `.env`.
+- Missing keys return a clean API error and do not prevent app startup.
+
+Frontend cannot reach backend:
+
+- Confirm `VITE_API_BASE_URL` points to the backend if you changed defaults.
+- Local default is `http://localhost:8000`.
+
+Sessions disappeared after restart:
+
+- This is expected in v0.1.0. Sessions, messages, events, and exports are generated from runtime memory only.
 
 ## Local Setup
 

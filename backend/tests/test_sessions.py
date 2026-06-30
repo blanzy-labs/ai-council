@@ -61,6 +61,49 @@ def test_create_session_rejects_unsupported_mode() -> None:
     assert response.status_code == 422
 
 
+def test_create_session_rejects_overly_long_title() -> None:
+    request = {
+        **VALID_SESSION_REQUEST,
+        "title": "x" * 121,
+    }
+
+    response = client.post("/sessions", json=request)
+
+    assert response.status_code == 422
+
+
+def test_create_session_rejects_overly_long_topic() -> None:
+    request = {
+        **VALID_SESSION_REQUEST,
+        "topic": "x" * 4001,
+    }
+
+    response = client.post("/sessions", json=request)
+
+    assert response.status_code == 422
+
+
+def test_create_session_rejects_more_personas_than_available() -> None:
+    request = {
+        **VALID_SESSION_REQUEST,
+        "selected_persona_ids": [
+            "moderator",
+            "strategist",
+            "skeptic",
+            "builder",
+            "ethicist",
+            "customer_advocate",
+            "contrarian",
+            "another_persona",
+        ],
+    }
+
+    response = client.post("/sessions", json=request)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["message"] == "Too many personas selected."
+
+
 def test_get_session_returns_created_session() -> None:
     created = create_valid_session()
 
