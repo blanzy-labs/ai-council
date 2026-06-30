@@ -9,6 +9,7 @@ Use this before publishing AI Council v0.1.0.
 - [ ] Confirm `.env` is ignored: `git check-ignore .env`
 - [ ] Confirm no secrets are committed: `git ls-files | grep -E '(^|/)\\.env$|secret'`
 - [ ] Confirm version references are v0.1.0.
+- [ ] Confirm `docs/disclaimer.md` exists and is linked from `README.md`.
 - [ ] Review README.
 - [ ] Review release notes.
 

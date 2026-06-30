@@ -30,3 +30,7 @@ AI Council v0.1.0 is intended for local testing and demos.
 - v0.1.0 is not hardened for public internet exposure.
 - It has no authentication or authorization layer.
 - It is intended for local testing/demo use on trusted machines and networks.
+
+## Disclaimer
+
+Read the [project disclaimer](disclaimer.md). Users are responsible for their own usage, costs, data, decisions, and outcomes.

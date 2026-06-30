@@ -6,6 +6,8 @@ A local-first, text-based multi-persona AI council room for structured discussio
 
 AI Council v0.1.0 is intended for local testing, demos, and iteration. It runs with a deterministic mock provider by default for safe local workflows, and can call OpenAI only when explicitly configured and selected.
 
+See the [disclaimer](docs/disclaimer.md) before using AI Council. You are responsible for your own usage, costs, data, decisions, and outcomes.
+
 ## Current Scope
 
 - OpenAI provider support
@@ -345,6 +347,7 @@ CORS/local URL issues:
 - [release notes](docs/release-notes/v0.1.0.md)
 - [GitHub release notes](docs/github-release-notes.md)
 - [demo guide](docs/demo.md)
+- [disclaimer](docs/disclaimer.md)
 - [validation checklist](docs/validation/v0.1.0-validation.md)
 - [architecture notes](docs/architecture.md)
 - [security and privacy notes](docs/security-and-privacy.md)
