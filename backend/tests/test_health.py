@@ -22,7 +22,7 @@ def test_root_returns_app_metadata() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "service": "ai-council-backend",
-        "version": "0.1.0",
+        "version": "0.1.2",
         "status": "ok",
         "docs": "/docs",
         "health": "/health",
@@ -35,7 +35,7 @@ def test_version_returns_scope_metadata() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "service": "ai-council",
-        "version": "0.1.0",
+        "version": "0.1.2",
         "provider_support": ["openai", "mock"],
         "voice": False,
         "gemini": False,

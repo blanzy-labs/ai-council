@@ -2,7 +2,7 @@
 
 ## High-Level Architecture
 
-AI Council v0.1.0 is a local app with a FastAPI backend, React/Vite frontend, provider adapters, in-memory stores, Server-Sent Events, and export generation.
+AI Council v0.1.x is a local app with a FastAPI backend, React/Vite frontend, provider adapters, in-memory stores, Server-Sent Events, and export generation.
 
 ```text
 React/Vite frontend
@@ -44,7 +44,7 @@ Providers expose a common `generate` interface and return normalized `ProviderRe
 
 ## Persona Registry
 
-The registry is static in v0.1.0 and supplies the default personas. Sessions reference personas by ID.
+The registry is static in v0.1.x and supplies the default personas. Sessions reference personas by ID.
 
 ## Session Store
 
@@ -62,7 +62,7 @@ The event bus stores a small recent buffer per session and supports subscribers 
 
 Exports are generated from the current in-memory session, messages, latest result, and optional recent events. No export files are persisted by the backend.
 
-## Why No Database In v0.1.0
+## Why No Database In v0.1.x
 
 The first release is intentionally local-first and lightweight. In-memory storage keeps setup simple, avoids migrations, and makes the behavior easy to inspect during public testing.
 

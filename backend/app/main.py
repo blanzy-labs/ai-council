@@ -36,7 +36,7 @@ from app.services.session_store import session_store
 from app.services.transcript_store import transcript_store
 
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.2"
 SSE_HEARTBEAT_SECONDS = 15.0
 export_service = ExportService(
     transcript_store=transcript_store,

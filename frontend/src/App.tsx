@@ -915,13 +915,13 @@ function App() {
   return (
     <main className="app-shell">
       <section className="intro">
-        <p className="eyebrow">Mythadis Labs</p>
+        <p className="eyebrow">Blanzy Labs / AI app family</p>
         <div className="intro-title">
           <h1>AI Council</h1>
-          <span className="version-badge">v0.1.0</span>
+          <span className="version-badge">v0.1.2</span>
         </div>
         <p className="tagline">Local text-based multi-persona council room</p>
-        <div className="scope-badges" aria-label="v0.1.0 scope">
+        <div className="scope-badges" aria-label="v0.1.x scope">
           <span>OpenAI-only</span>
           <span>No voice</span>
           <span>Local-first</span>

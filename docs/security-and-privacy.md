@@ -1,6 +1,6 @@
 # Security And Privacy Notes
 
-AI Council v0.1.0 is intended for local testing and demos.
+AI Council v0.1.x is intended for local testing and demos.
 
 ## Local-First Design
 
@@ -27,7 +27,7 @@ AI Council v0.1.0 is intended for local testing and demos.
 
 ## Exposure Limits
 
-- v0.1.0 is not hardened for public internet exposure.
+- v0.1.x is not hardened for public internet exposure.
 - It has no authentication or authorization layer.
 - It is intended for local testing/demo use on trusted machines and networks.
 

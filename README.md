@@ -2,9 +2,11 @@
 
 A local-first, text-based multi-persona AI council room for structured discussion, critique, follow-up chat, live activity events, and transcript export.
 
-**Version:** v0.1.0 - Local Council MVP
+Part of the Blanzy Labs AI app family.
 
-AI Council v0.1.0 is intended for local testing, demos, and iteration. It runs with a deterministic mock provider by default for safe local workflows, and can call OpenAI only when explicitly configured and selected.
+**Current release:** v0.1.2 - Blanzy Labs Standardization Patch
+
+AI Council v0.1.x is intended for local testing, demos, and iteration. It runs with a deterministic mock provider by default for safe local workflows, and can call OpenAI only when explicitly configured and selected.
 
 See the [disclaimer](docs/disclaimer.md) before using AI Council. You are responsible for your own usage, costs, data, decisions, and outcomes.
 
@@ -24,7 +26,7 @@ See the [disclaimer](docs/disclaimer.md) before using AI Council. You are respon
 - In-memory sessions/transcripts/events only
 - Docker Compose local run
 
-## Out Of Scope For v0.1.0
+## Out Of Scope For v0.1.x
 
 - Voice
 - Gemini
@@ -52,12 +54,15 @@ See the [disclaimer](docs/disclaimer.md) before using AI Council. You are respon
 - Export service generates Markdown and JSON from the current in-memory session state.
 - Docker Compose runs backend and frontend together for local validation.
 
-There is no database in v0.1.0. Restarting the backend loses sessions, transcripts, events, and exportable state.
+There is no database in v0.1.x. Restarting the backend loses sessions, transcripts, events, and exportable state.
 
 ## Local Setup
 
+For the standalone setup guide, see [Local Install](docs/local-install.md).
+
 Prerequisites:
 
+- Git
 - Python 3.13
 - `uv`
 - Node.js and `pnpm`
@@ -305,6 +310,8 @@ curl -X DELETE http://localhost:8000/sessions/<SESSION_ID>/events
 
 ## Troubleshooting
 
+For the standalone troubleshooting guide, see [Troubleshooting](docs/troubleshooting.md).
+
 Docker Desktop not running:
 
 - Start Docker Desktop or your Docker daemon.
@@ -334,22 +341,28 @@ Mock works but OpenAI fails:
 
 Sessions disappear after restart:
 
-- Expected in v0.1.0. Runtime state is in memory only.
+- Expected in v0.1.x. Runtime state is in memory only.
 
 CORS/local URL issues:
 
 - Default allowed frontend origins are `http://localhost:5173` and `http://127.0.0.1:5173`.
 - Add comma-separated local origins with `CORS_ORIGINS` if needed.
 
-## Release Docs
+## Documentation
 
 - [v0.1.0 scope](docs/v0.1.0-scope.md)
-- [release notes](docs/release-notes/v0.1.0.md)
+- [release notes v0.1.0](docs/release-notes/v0.1.0.md)
+- [release notes v0.1.1](docs/release-notes/v0.1.1.md)
+- [release notes v0.1.2](docs/release-notes/v0.1.2.md)
 - [GitHub release notes](docs/github-release-notes.md)
 - [demo guide](docs/demo.md)
+- [local install](docs/local-install.md)
+- [troubleshooting](docs/troubleshooting.md)
 - [disclaimer](docs/disclaimer.md)
 - [validation checklist](docs/validation/v0.1.0-validation.md)
+- [validation v0.1.2](docs/validation/v0.1.2-validation.md)
 - [architecture notes](docs/architecture.md)
 - [security and privacy notes](docs/security-and-privacy.md)
 - [sample scenarios](docs/sample-scenarios.md)
 - [release checklist](docs/release-checklist.md)
+- [license](LICENSE)

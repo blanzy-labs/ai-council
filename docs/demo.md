@@ -68,7 +68,7 @@ If no key is configured, OpenAI calls should fail gracefully and mock mode shoul
 
 ## Notes For Screen Recording Or Screenshots
 
-- Start with the header visible so the v0.1.0 scope badges are clear.
+- Start with the header visible so the v0.1.x scope badges are clear.
 - Show the health panel before creating a session.
 - Use mock provider for deterministic output.
 - Show live activity while a run/chat completes.
